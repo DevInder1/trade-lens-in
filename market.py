@@ -67,15 +67,25 @@ def is_index(symbol: str) -> bool:
     return symbol.startswith("^")
 
 
-def load_prices(symbol: str, period: str) -> pd.DataFrame:
-    df = yf.Ticker(symbol).history(period=period, interval="1d", auto_adjust=False)
+def _clean(df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     if df is None or df.empty:
         raise ValueError(f"No price data found for {symbol}. Check the symbol and exchange.")
     df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
     if df.index.tz is not None:
         df.index = df.index.tz_localize(None)
+    df.index = df.index.normalize()
     df.index.name = "Date"
     return df
+
+
+def load_prices(symbol: str, period: str) -> pd.DataFrame:
+    return _clean(yf.Ticker(symbol).history(period=period, interval="1d", auto_adjust=False), symbol)
+
+
+def load_history(symbol: str, start, end=None) -> pd.DataFrame:
+    start = pd.Timestamp(start).strftime("%Y-%m-%d")
+    end = (pd.Timestamp(end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d") if end is not None else None
+    return _clean(yf.Ticker(symbol).history(start=start, end=end, interval="1d", auto_adjust=False), symbol)
 
 
 def load_fundamentals(symbol: str) -> dict:
@@ -98,20 +108,28 @@ def load_news(symbol: str, company: str = "", limit: int = 15) -> list[dict]:
     return news[:limit]
 
 
-def market_headlines(limit: int = 12) -> list[dict]:
-    news = _google_news("Sensex Nifty stock market", limit, days=7)
-    news.sort(key=lambda n: n["date"], reverse=True)
-    return news
+def market_headlines(limit: int = 12, as_of=None) -> list[dict]:
+    return _google_news("Sensex Nifty stock market", limit, days=7, as_of=as_of)
 
 
-def _google_news(query: str, limit: int, days: int = 30) -> list[dict]:
-    url = "https://news.google.com/rss/search?" + urlencode(
-        {"q": f"{query} when:{days}d", "hl": "en-IN", "gl": "IN", "ceid": "IN:en"})
+def news_as_of(company: str, as_of, limit: int = 15) -> list[dict]:
+    return _google_news(f"{company} share price", limit, days=30, as_of=as_of)
+
+
+def _google_news(query: str, limit: int, days: int = 30, as_of=None) -> list[dict]:
+    if as_of is not None:
+        end = pd.Timestamp(as_of)
+        start = end - pd.Timedelta(days=days)
+        query = f"{query} after:{start:%Y-%m-%d} before:{end + pd.Timedelta(days=1):%Y-%m-%d}"
+    else:
+        query = f"{query} when:{days}d"
+    url = "https://news.google.com/rss/search?" + urlencode({"q": query, "hl": "en-IN", "gl": "IN", "ceid": "IN:en"})
     try:
         with urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=10) as resp:
             root = ElementTree.fromstring(resp.read())
     except Exception:
         return []
+    cutoff = pd.Timestamp(as_of).strftime("%Y-%m-%d") if as_of is not None else None
     news = []
     for item in root.iter("item"):
         title = (item.findtext("title") or "").strip()
@@ -122,12 +140,12 @@ def _google_news(query: str, limit: int, days: int = 30) -> list[dict]:
             date = parsedate_to_datetime(item.findtext("pubDate") or "").strftime("%Y-%m-%d")
         except (TypeError, ValueError):
             date = ""
-        if title:
-            news.append({"title": title, "publisher": source, "date": date,
-                         "url": item.findtext("link") or "", "summary": ""})
-        if len(news) >= limit:
-            break
-    return news
+        if not title or (cutoff and (not date or date > cutoff)):
+            continue
+        news.append({"title": title, "publisher": source, "date": date,
+                     "url": item.findtext("link") or "", "summary": ""})
+    news.sort(key=lambda n: n["date"], reverse=True)
+    return news[:limit]
 
 
 def _yahoo_news(symbol: str, company: str, limit: int) -> list[dict]:

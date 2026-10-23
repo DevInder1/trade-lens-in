@@ -134,6 +134,22 @@ def signals(s: dict) -> list[dict]:
     return out
 
 
+ROW_KEYS = ["Close", "SMA50", "SMA200", "RSI", "MACD", "MACD_signal", "BB_upper", "BB_lower"]
+
+
+def view_series(df: pd.DataFrame) -> pd.DataFrame:
+    prev_close = df["Close"].shift(1)
+    rows = []
+    for (ts, row), prev in zip(df.iterrows(), prev_close):
+        s = {k: _value(row.get(k)) for k in ROW_KEYS}
+        s["change_1d"] = _value((row["Close"] / prev - 1) * 100) if prev else None
+        vol, avg = _value(row.get("Volume")), _value(row.get("VolAvg20"))
+        s["volume_ratio"] = vol / avg if vol and avg else None
+        view, score = overall(signals(s))
+        rows.append((ts, view, score))
+    return pd.DataFrame(rows, columns=["Date", "view", "score"]).set_index("Date")
+
+
 def overall(sigs: list[dict]) -> tuple[str, int]:
     score = sum(1 if x["verdict"] == "Bullish" else -1 if x["verdict"] == "Bearish" else 0 for x in sigs)
     if score >= 2:

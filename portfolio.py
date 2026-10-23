@@ -1,32 +1,38 @@
-import json
-import os
-from pathlib import Path
+from storage import DATA_DIR, read_json, write_json
 
-PATH = Path(__file__).with_name("portfolio.json")
-DEFAULT = {"capital": 0.0, "risk_pct": 1.0, "positions": {}}
+PATH = DATA_DIR / "portfolio.json"
 STOP_ATR_MULTIPLE = 2.0
 
 
 def load() -> dict:
-    try:
-        data = json.loads(PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return json.loads(json.dumps(DEFAULT))
-    if not isinstance(data, dict):
-        return json.loads(json.dumps(DEFAULT))
+    data = read_json(PATH, {})
+    positions = data.get("positions")
+    watchlist = data.get("watchlist")
     return {
         "capital": float(data.get("capital") or 0),
         "risk_pct": float(data.get("risk_pct") or 1.0),
-        "positions": data.get("positions") if isinstance(data.get("positions"), dict) else {},
+        "positions": positions if isinstance(positions, dict) else {},
+        "watchlist": [s for s in watchlist if isinstance(s, str)] if isinstance(watchlist, list) else [],
     }
 
 
 def save(data: dict) -> None:
-    temp = PATH.with_suffix(".tmp")
-    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=1)
-    os.replace(temp, PATH)
+    write_json(PATH, data)
+
+
+def add_to_watchlist(symbols: list[str]) -> list[str]:
+    book = load()
+    added = [s for s in symbols if s and s not in book["watchlist"]]
+    if added:
+        book["watchlist"] += added
+        save(book)
+    return added
+
+
+def remove_from_watchlist(symbols: list[str]) -> None:
+    book = load()
+    book["watchlist"] = [s for s in book["watchlist"] if s not in symbols]
+    save(book)
 
 
 def position_summary(qty: float, avg: float, price: float) -> dict:
@@ -41,6 +47,13 @@ def position_summary(qty: float, avg: float, price: float) -> dict:
         "pnl": pnl,
         "pnl_pct": (pnl / invested * 100) if invested else None,
     }
+
+
+def holding_for(book: dict, symbol: str, price: float):
+    pos = book["positions"].get(symbol) or {}
+    if pos.get("owned") == "Yes" and pos.get("qty") and pos.get("avg"):
+        return position_summary(float(pos["qty"]), float(pos["avg"]), price)
+    return None
 
 
 def sizing(capital: float, risk_pct: float, price: float, atr: float | None) -> dict | None:
@@ -86,3 +99,10 @@ def describe(owned: str, summary: dict | None, capital: float, risk_pct: float, 
             f"₹{size['risk_per_share']:,.2f} risk per share): at most {size['max_qty']} shares "
             f"(₹{size['max_value']:,.0f}, {size['pct_of_capital']:.1f}% of capital) for a NEW purchase.")
     return "\n".join(lines)
+
+
+def describe_for(book: dict, symbol: str, price: float, atr: float | None) -> str:
+    owned = (book["positions"].get(symbol) or {}).get("owned", "Not saying")
+    holding = holding_for(book, symbol, price)
+    size = sizing(book["capital"], book["risk_pct"], price, atr)
+    return describe(owned, holding, book["capital"], book["risk_pct"], size)

@@ -6,6 +6,19 @@ UP = "#16a34a"
 DOWN = "#dc2626"
 
 
+def equity_chart(curves: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    colors = {"Signals strategy": "#2563eb", "Buy and hold": "#f59e0b", "NIFTY 50": "#94a3b8"}
+    for col in curves.columns:
+        fig.add_trace(go.Scatter(x=curves.index, y=curves[col], name=col,
+                                 line=dict(color=colors.get(col), width=2 if col == "Signals strategy" else 1.4)))
+    fig.add_hline(y=100, line=dict(color="#64748b", width=1, dash="dot"))
+    fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10), hovermode="x unified",
+                      yaxis_title="Value of ₹100 invested", legend=dict(orientation="h", y=1.08, x=0))
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
+    return fig
+
+
 def price_chart(df: pd.DataFrame, title: str) -> go.Figure:
     fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.03,
                         row_heights=[0.55, 0.13, 0.16, 0.16],

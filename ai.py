@@ -143,9 +143,25 @@ def _technical_data(data: dict) -> str:
 
 
 def _fundamental_data(data: dict) -> str:
+    if data.get("as_of"):
+        return "Not used in historical tests: only today's figures exist, which would reveal the future."
     if not data["fundamentals"]:
         return "No fundamental data is available (this may be an index)."
     return _dump(data["fundamentals"])
+
+
+def _header(data: dict) -> str:
+    if not data.get("as_of"):
+        return ""
+    return (f"IMPORTANT: this is a historical test. Today is {data['as_of']}. Use only the data below and ignore "
+            "anything you may know about events after this date.\n\n")
+
+
+def _memory(data: dict) -> str:
+    if not data.get("memory"):
+        return ""
+    return ("\n\nOUR TEAM'S PAST DECISIONS AND LESSONS (learn from them; do not repeat past mistakes):\n"
+            f"{data['memory']}")
 
 
 def _headlines(items: list[dict]) -> str:
@@ -300,47 +316,58 @@ def _debate(provider, model, api_key, roles: dict, context: str, rounds: int, no
     return entries
 
 
+def team_analysts(analysts: list[str], historical: bool) -> list[str]:
+    chosen = [a for a in ANALYSTS if a in analysts] or ANALYSTS
+    if historical:
+        chosen = [a for a in chosen if a not in ("Fundamentals", "Sentiment")] or ["Technical"]
+    return chosen
+
+
 def run_team(provider: str, model: str, api_key: str, data: dict, analysts: list[str], rounds: int,
              quick: bool, on_step=None) -> dict:
     notify = on_step or (lambda _msg: None)
     position = data["position_text"]
+    head = _header(data)
+    memory = _memory(data)
 
     if quick:
         notify("Portfolio Manager is reviewing all the data")
         prompt = (
-            "Act as the Portfolio Manager doing a quick review on your own. Weigh the technical data, fundamentals, "
-            f"news, macro and social sentiment below, and the user's position.\n\nUSER'S POSITION:\n{position}\n\n"
-            f"{DECISION_FORMAT}\n\n=== TECHNICAL DATA ===\n{_technical_data(data)}\n\n=== FUNDAMENTALS ===\n"
-            f"{_fundamental_data(data)}\n\n=== NEWS & MACRO ===\n{_news_data(data)}\n\n=== SOCIAL SENTIMENT ===\n"
-            f"{_sentiment_data(data)}\n\n=== RISK FACTS ===\n{_risk_facts(data)}"
+            f"{head}Act as the Portfolio Manager doing a quick review on your own. Weigh the technical data, "
+            "fundamentals, news, macro and social sentiment below, and the user's position.\n\nUSER'S POSITION:\n"
+            f"{position}{memory}\n\n{DECISION_FORMAT}\n\n=== TECHNICAL DATA ===\n{_technical_data(data)}\n\n"
+            f"=== FUNDAMENTALS ===\n{_fundamental_data(data)}\n\n=== NEWS & MACRO ===\n{_news_data(data)}\n\n"
+            f"=== SOCIAL SENTIMENT ===\n{_sentiment_data(data)}\n\n=== RISK FACTS ===\n{_risk_facts(data)}"
         )
         return {"final": ask(provider, model, api_key, prompt), "calls": 1}
 
-    chosen = [a for a in ANALYSTS if a in analysts] or ANALYSTS
+    chosen = team_analysts(analysts, bool(data.get("as_of")))
     notify(f"{', '.join(chosen)} analyst{'s are' if len(chosen) > 1 else ' is'} working")
-    reports = _parallel(provider, model, api_key, {name: ANALYST_PROMPTS[name](data) for name in chosen})
+    reports = _parallel(provider, model, api_key, {name: head + ANALYST_PROMPTS[name](data) for name in chosen})
     analyst_notes = "\n\n".join(f"=== {name} Analyst ===\n{text}" for name, text in reports.items())
 
-    research = _debate(provider, model, api_key, RESEARCH_ROLES, analyst_notes, rounds, notify, "Bull vs Bear debate")
+    research = _debate(provider, model, api_key, RESEARCH_ROLES, head + analyst_notes, rounds, notify,
+                       "Bull vs Bear debate")
 
     notify("Trader is drafting the trading plan")
     trader = ask(provider, model, api_key, (
-        "You are the Trader. Read the analyst reports and the bull vs bear debate, decide who argued better, and turn "
-        f"it into a concrete trading plan for this user.\n\nUSER'S POSITION:\n{position}\n\nRISK FACTS:\n"
-        f"{_risk_facts(data)}\n\n{TRADER_FORMAT}\n\n{analyst_notes}\n\n=== BULL VS BEAR DEBATE ===\n"
+        f"{head}You are the Trader. Read the analyst reports and the bull vs bear debate, decide who argued better, "
+        f"and turn it into a concrete trading plan for this user.\n\nUSER'S POSITION:\n{position}{memory}\n\n"
+        f"RISK FACTS:\n{_risk_facts(data)}\n\n{TRADER_FORMAT}\n\n{analyst_notes}\n\n=== BULL VS BEAR DEBATE ===\n"
         f"{_transcript(research)}"
     ))
 
-    risk_context = (f"USER'S POSITION:\n{position}\n\nRISK FACTS:\n{_risk_facts(data)}\n\n=== TRADER'S PLAN ===\n"
-                    f"{trader}\n\n{analyst_notes}")
+    risk_context = (f"{head}USER'S POSITION:\n{position}\n\nRISK FACTS:\n{_risk_facts(data)}\n\n"
+                    f"=== TRADER'S PLAN ===\n{trader}\n\n{analyst_notes}")
     risk = _debate(provider, model, api_key, RISK_ROLES, risk_context, rounds, notify, "Risk team debate")
 
     notify("Portfolio Manager is making the final decision")
     final = ask(provider, model, api_key, (
-        "You are the Portfolio Manager and you make the final decision. Review the trader's plan and the risk team's "
-        "debate, then approve, modify or reject the plan. Protect the user's capital first, and fit the decision to "
-        f"their position.\n\nUSER'S POSITION:\n{position}\n\nRISK FACTS:\n{_risk_facts(data)}\n\n{DECISION_FORMAT}"
-        f"\n\n=== TRADER'S PLAN ===\n{trader}\n\n=== RISK TEAM DEBATE ===\n{_transcript(risk)}\n\n{analyst_notes}"
+        f"{head}You are the Portfolio Manager and you make the final decision. Review the trader's plan and the risk "
+        "team's debate, then approve, modify or reject the plan. Protect the user's capital first, and fit the "
+        f"decision to their position.\n\nUSER'S POSITION:\n{position}{memory}\n\nRISK FACTS:\n{_risk_facts(data)}"
+        f"\n\n{DECISION_FORMAT}\n\n=== TRADER'S PLAN ===\n{trader}\n\n=== RISK TEAM DEBATE ===\n"
+        f"{_transcript(risk)}\n\n{analyst_notes}"
     ))
 
     return {
@@ -351,6 +378,10 @@ def run_team(provider: str, model: str, api_key: str, data: dict, analysts: list
         "final": final,
         "calls": call_count(chosen, rounds, False),
     }
+
+
+def asker(provider: str, model: str, api_key: str):
+    return lambda prompt: ask(provider, model, api_key, prompt)
 
 
 def _field(text: str, key: str) -> str | None:

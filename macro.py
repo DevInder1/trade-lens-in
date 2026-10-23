@@ -1,7 +1,10 @@
 import math
 from concurrent.futures import ThreadPoolExecutor
 
+import pandas as pd
 import yfinance as yf
+
+import market
 
 MACRO = {
     "NIFTY 50": "^NSEI",
@@ -33,16 +36,19 @@ def _trend(close):
     return "Mixed (between its 50- and 200-day averages)"
 
 
-def _history(symbol):
+def _history(symbol, as_of=None):
     try:
-        return yf.Ticker(symbol).history(period="1y", interval="1d")["Close"].dropna()
+        if as_of is None:
+            return yf.Ticker(symbol).history(period="1y", interval="1d")["Close"].dropna()
+        end = pd.Timestamp(as_of)
+        return market.load_history(symbol, end - pd.Timedelta(days=400), end)["Close"]
     except Exception:
         return None
 
 
-def load_macro() -> list[dict]:
+def load_macro(as_of=None) -> list[dict]:
     with ThreadPoolExecutor(max_workers=8) as pool:
-        closes = dict(zip(MACRO, pool.map(_history, MACRO.values())))
+        closes = dict(zip(MACRO, pool.map(lambda s: _history(s, as_of), MACRO.values())))
     rows = []
     for name, symbol in MACRO.items():
         close = closes[name]

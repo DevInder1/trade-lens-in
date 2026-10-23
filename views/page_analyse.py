@@ -1,0 +1,270 @@
+import pandas as pd
+import streamlit as st
+
+import ai
+import charts
+import macro
+import market
+import portfolio
+import research
+import settings
+import track
+import ui
+
+PERIODS = {"3 months": 3, "6 months": 6, "1 year": 12, "2 years": 24, "5 years": 60}
+OWNERSHIP = ["Not saying", "No", "Yes"]
+
+prefs = settings.load()
+if "goto_symbol" in st.session_state:
+    target = st.session_state.pop("goto_symbol")
+    st.session_state["symbol_query"] = target
+    st.session_state["symbol_exchange"] = "BSE" if target.endswith(".BO") else "NSE"
+st.session_state.setdefault("symbol_query", prefs["last_query"])
+st.session_state.setdefault("symbol_exchange", prefs["last_exchange"])
+
+book = portfolio.load()
+
+with st.sidebar:
+    st.subheader("1. Pick a stock")
+    exchange = st.radio("Exchange", ["NSE", "BSE"], horizontal=True, key="symbol_exchange")
+    query = st.text_input("Symbol or index", key="symbol_query",
+                          help="Examples: RELIANCE, TCS, HDFCBANK, INFY, TATAMOTORS, NIFTY 50, BANK NIFTY, SENSEX")
+    period_label = st.selectbox("Chart period", list(PERIODS), index=2)
+    symbol = market.normalize_symbol(query, exchange)
+    settings.update(last_query=query, last_exchange=exchange)
+    if symbol:
+        if symbol in book["watchlist"]:
+            if st.button("☆ Remove from watchlist"):
+                portfolio.remove_from_watchlist([symbol])
+                st.rerun()
+        elif st.button("⭐ Add to watchlist"):
+            portfolio.add_to_watchlist([symbol])
+            st.rerun()
+
+    st.subheader("2. Your position (optional)")
+    saved_pos = book["positions"].get(symbol, {})
+    owned = st.radio("Do you own this stock?", OWNERSHIP, horizontal=True,
+                     index=OWNERSHIP.index(saved_pos.get("owned", "Not saying")), key=f"owned::{symbol}")
+    qty, avg = 0.0, 0.0
+    if owned == "Yes":
+        qty = st.number_input("Shares held", min_value=0.0, step=1.0, value=float(saved_pos.get("qty", 0)),
+                              key=f"qty::{symbol}")
+        avg = st.number_input("Average buy price (₹)", min_value=0.0, step=1.0,
+                              value=float(saved_pos.get("avg", 0)), key=f"avg::{symbol}")
+    capital = st.number_input("Trading capital (₹)", min_value=0.0, step=10000.0, value=book["capital"],
+                              help="Money you would use for trading. Used to size positions. Leave 0 to skip.")
+    risk_pct = st.slider("Max risk per trade (% of capital)", 0.25, 3.0, value=min(max(book["risk_pct"], 0.25), 3.0),
+                         step=0.25, help="How much you accept to lose if the stop-loss is hit. 1% is a common rule.")
+    new_pos = {"owned": owned, "qty": qty, "avg": avg} if owned == "Yes" else {"owned": owned}
+    if symbol and (new_pos != saved_pos or capital != book["capital"] or risk_pct != book["risk_pct"]):
+        if owned == "Not saying":
+            book["positions"].pop(symbol, None)
+        else:
+            book["positions"][symbol] = new_pos
+        book["capital"], book["risk_pct"] = capital, risk_pct
+        portfolio.save(book)
+    st.caption("Saved only on this computer. Sent only to the AI you choose.")
+
+cfg = ui.ai_sidebar()
+st.sidebar.divider()
+st.sidebar.caption(ui.DISCLAIMER)
+
+if not symbol:
+    st.info("Type a stock symbol in the sidebar to begin.")
+    st.stop()
+
+try:
+    with st.spinner(f"Loading {symbol}…"):
+        df = ui.get_prices(symbol, "5y" if PERIODS[period_label] > 24 else "2y")
+except Exception as exc:
+    st.error(f"Could not load prices for **{symbol}**: {exc}")
+    st.caption("Tip: use the NSE code (e.g. HDFCBANK, not HDFC Bank). Switch to BSE if the stock is only listed there.")
+    st.stop()
+
+with st.spinner("Loading fundamentals, news, sentiment and market data…"):
+    fundamentals = {} if market.is_index(symbol) else ui.get_fundamentals(symbol)
+    name = fundamentals.get("Company") or query.strip().upper()
+    data = research.build(symbol, df=df, name=name, fundamentals=fundamentals, news=ui.get_news(symbol, name),
+                          market_news=ui.get_market_news(), macro_rows=ui.get_macro(),
+                          chatter=ui.get_social(symbol, name), book=book)
+
+snap, sigs = data["snapshot"], data["signals"]
+tech_view, tech_score = data["view"], data["score"]
+relative, vix = data["relative"], data["vix"]
+holding = portfolio.holding_for(book, symbol, snap["Close"])
+size = portfolio.sizing(capital, risk_pct, snap["Close"], snap["ATR"])
+
+st.title(name)
+st.caption(f"{symbol} · last close {snap['date']} · data from Yahoo Finance (may be delayed)"
+           + (" · ⭐ on your watchlist" if symbol in book["watchlist"] else ""))
+
+cols = st.columns(3)
+cols[0].metric("Last close", ui.rupees(snap["Close"]), ui.pct(snap["change_1d"]))
+cols[1].metric("1 month", ui.pct(snap["change_1m"]),
+               None if "vs_nifty_1m" not in relative else f"{relative['vs_nifty_1m']:+.2f} pts vs NIFTY")
+cols[2].metric("1 year", ui.pct(snap["change_1y"]))
+cols = st.columns(3)
+cols[0].metric("52-week low / high", f"{snap['low_52w']:,.0f} / {snap['high_52w']:,.0f}")
+cols[1].metric("Technical signals", f"{ui.BADGE[tech_view]} {tech_view}", f"score {tech_score:+d}", delta_color="off")
+if holding:
+    cols[2].metric("Your P&L", ui.rupees(holding["pnl"], 0), ui.pct(holding["pnl_pct"]))
+else:
+    cols[2].metric("Market mood (India VIX)", macro.vix_mood(data["macro_rows"]) or "–")
+chart_df = df[df.index >= df.index[-1] - pd.DateOffset(months=PERIODS[period_label])]
+
+tabs = st.tabs(["📊 Chart", "🚦 Signals", "🏢 Fundamentals", "📰 News", "💬 Sentiment", "🌏 Market",
+                "💼 Position", "🤖 AI Team"])
+tab_chart, tab_signals, tab_fund, tab_news, tab_social, tab_market, tab_position, tab_ai = tabs
+
+with tab_chart:
+    st.plotly_chart(charts.price_chart(chart_df, f"{name} ({symbol})"), width="stretch")
+    st.caption("Lines: orange = 20-day average, blue = 50-day, purple = 200-day, dotted = Bollinger Bands. "
+               "RSI above 70 = overbought, below 30 = oversold.")
+
+with tab_signals:
+    st.subheader(f"{ui.BADGE[tech_view]} Overall: {tech_view} (score {tech_score:+d})")
+    st.caption("Simple rule-based checks. Each bullish signal adds 1, each bearish subtracts 1. No AI used. "
+               "See how reliable they have been for this stock on the Backtest page.")
+    for s in sigs:
+        st.markdown(f"{ui.BADGE[s['verdict']]} **{s['name']}** — {s['verdict']}  \n{s['detail']}")
+    st.divider()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Support (20-day low)", ui.rupees(snap["support_20d"]))
+    c2.metric("Resistance (20-day high)", ui.rupees(snap["resistance_20d"]))
+    c3.metric("Average daily move (ATR)", ui.rupees(snap["ATR"]),
+              None if snap["atr_pct"] is None else f"{snap['atr_pct']:.2f}% of price", delta_color="off")
+
+with tab_fund:
+    if fundamentals:
+        st.dataframe([{"Metric": k, "Value": ui.nice(v)} for k, v in fundamentals.items()],
+                     width="stretch", hide_index=True)
+    else:
+        st.info("No fundamental data for this symbol (indices have none).")
+
+with tab_news:
+    if data["news"]:
+        for n in data["news"]:
+            title = f"[{n['title']}]({n['url']})" if n["url"] else n["title"]
+            st.markdown(f"**{title}**  \n{n['publisher']} · {n['date']}")
+    else:
+        st.info("No recent news found for this symbol.")
+
+with tab_social:
+    st.caption("What retail investors are saying. Social chatter is noisy: treat it as a mood check, not a signal.")
+    stw = data["social"]["stocktwits"]
+    rd = data["social"]["reddit"]
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("StockTwits messages", len(stw["messages"]))
+    c2.metric("Labelled bullish", stw["bullish"])
+    c3.metric("Labelled bearish", stw["bearish"])
+    c4.metric("Reddit posts (30 days)", len(rd["posts"]))
+    left, right = st.columns(2)
+    with left:
+        st.markdown("#### StockTwits")
+        if stw["messages"]:
+            for m in stw["messages"][:15]:
+                mood = {"Bullish": "🟢", "Bearish": "🔴"}.get(m["sentiment"], "⚪")
+                st.markdown(f"{mood} {m['body']}")
+                st.caption(f"{m['date']} · {m['likes']} likes")
+        else:
+            st.info("No StockTwits messages for this symbol.")
+    with right:
+        st.markdown("#### Reddit (Indian investing communities)")
+        if rd["posts"]:
+            for p in rd["posts"][:15]:
+                st.markdown(f"**[{p['title']}]({p['url']})**  \nr/{p['subreddit']} · {p['date']}")
+        elif rd.get("error"):
+            st.warning(rd["error"])
+            if st.button("Retry Reddit"):
+                ui.get_social.clear()
+                st.rerun()
+        else:
+            st.info("No Reddit posts mentioning this stock in the last 30 days.")
+
+with tab_market:
+    if vix:
+        st.subheader(f"🌡️ {vix}")
+    if data["macro_rows"]:
+        st.dataframe([{
+            "Indicator": r["name"], "Last": f"{r['last']:,.2f}", "1 week": ui.pct(r["change_1w"]),
+            "1 month": ui.pct(r["change_1m"]), "3 months": ui.pct(r["change_3m"]), "Trend": r["trend"] or "–",
+        } for r in data["macro_rows"]], width="stretch", hide_index=True)
+    if relative:
+        parts = [f"{v:+.2f} pts over {k.split('_')[-1]}" for k, v in relative.items()]
+        st.markdown(f"**{name} vs NIFTY 50:** " + ", ".join(parts) + " (positive = beating the market)")
+    st.markdown("#### Market headlines (last 7 days)")
+    for n in data["market_news"]:
+        title = f"[{n['title']}]({n['url']})" if n["url"] else n["title"]
+        st.markdown(f"**{title}**  \n{n['publisher']} · {n['date']}")
+
+with tab_position:
+    if holding:
+        st.subheader("Your holding")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Shares", f"{holding['qty']:g}")
+        c2.metric("Average price", ui.rupees(holding["avg"]))
+        c3.metric("Current value", ui.rupees(holding["value"], 0))
+        c4.metric("Unrealised P&L", ui.rupees(holding["pnl"], 0), ui.pct(holding["pnl_pct"]))
+    elif owned == "Yes":
+        st.info("Enter your shares and average price in the sidebar.")
+    else:
+        st.info("Tell the app in the sidebar whether you own this stock so the AI team can tailor its plan.")
+    st.subheader("Position sizing (rule-based, no AI)")
+    if size:
+        st.caption(f"Stop-loss placed {portfolio.STOP_ATR_MULTIPLE:g}× the average daily move (ATR) below the price; "
+                   f"if it is hit you lose at most {risk_pct:g}% of your capital.")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Suggested stop-loss", ui.rupees(size["stop"]))
+        c2.metric("Risk per share", ui.rupees(size["risk_per_share"]))
+        c3.metric("Max shares to buy", f"{size['max_qty']:,}")
+        c4.metric("Max position value", ui.rupees(size["max_value"], 0), f"{size['pct_of_capital']:.1f}% of capital",
+                  delta_color="off")
+    else:
+        st.info("Enter your trading capital in the sidebar to see how many shares you could buy safely.")
+    if data["liquidity"]:
+        st.caption(f"Liquidity: about ₹{data['liquidity'] / 1e7:,.2f} Cr traded per day (20-day average).")
+
+with tab_ai:
+    if cfg["provider"] == ui.NO_AI:
+        st.info("Choose an AI provider in the sidebar to get a decision from a team of AI analysts.")
+        st.markdown(
+            "**Which one should I use?** Your Claude, Gemini or ChatGPT *subscriptions* don't work here — apps need "
+            "a separate **API key**. The easiest is a free Gemini key from "
+            "[Google AI Studio](https://aistudio.google.com/apikey): sign in, click *Create API key*, paste it in the sidebar."
+        )
+    else:
+        if cfg["quick"]:
+            st.markdown("**Quick mode:** one Portfolio Manager reviews everything in a single AI call.")
+        else:
+            st.markdown(
+                f"**How it works:** {', '.join(cfg['analysts'])} analysts write reports → Bull vs Bear debate "
+                f"({cfg['rounds']} round{'s' if cfg['rounds'] > 1 else ''}) → the Trader drafts a plan → the "
+                "Aggressive, Conservative and Neutral risk analysts challenge it → the Portfolio Manager approves, "
+                "modifies or rejects it. Only market data and the position you entered are sent to the AI."
+            )
+        if data["memory"]:
+            st.caption("🧠 The team will be reminded of its past calls and lessons (see Track record).")
+        state_key = f"result::{symbol}::{cfg['provider']}::{cfg['model']}"
+        if st.button("▶ Run AI analysis", type="primary", disabled=not cfg["ready"]):
+            result = ui.run_ai(cfg, data)
+            if result:
+                research.record_ai(data, result, cfg["provider"], cfg["model"], prefs["horizon_days"],
+                                   "ai-quick" if cfg["quick"] else "ai")
+                st.session_state[state_key] = result
+        if not cfg["api_key"]:
+            st.warning("Paste an API key in the sidebar to run the AI team.")
+
+        result = st.session_state.get(state_key)
+        if result:
+            ui.decision_card(result)
+            report = ai.to_markdown(result, f"{name} ({symbol}) — Trade Lens IN report, {result['time']}")
+            st.download_button("⬇ Download full report", report,
+                               file_name=f"{symbol}-{pd.Timestamp.now():%Y%m%d-%H%M}.md", mime="text/markdown")
+            st.caption(f"Saved to your track record. It will be judged after {prefs['horizon_days']} trading days.")
+
+    past = track.decisions(symbol)
+    if past:
+        st.divider()
+        st.markdown("#### 🎯 Track record for this stock")
+        _, progress = ui.refresh_track(pd.Timestamp.now().strftime("%Y-%m-%d %H"))
+        ui.decisions_table(past[:10], progress, show_symbol=False)
