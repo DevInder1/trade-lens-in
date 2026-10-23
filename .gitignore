@@ -1,3 +1,5 @@
 .env
+portfolio.json
+portfolio.tmp
 .venv/
 __pycache__/

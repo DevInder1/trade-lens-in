@@ -90,7 +90,7 @@ def load_news(symbol: str, company: str = "", limit: int = 15) -> list[dict]:
     news = _yahoo_news(symbol, company, limit)
     seen = {n["title"].lower() for n in news}
     if len(news) < limit:
-        for n in _google_news(company or symbol.split(".")[0], limit):
+        for n in _google_news(f"{company or symbol.split('.')[0]} share price", limit):
             if n["title"].lower() not in seen:
                 seen.add(n["title"].lower())
                 news.append(n)
@@ -98,9 +98,15 @@ def load_news(symbol: str, company: str = "", limit: int = 15) -> list[dict]:
     return news[:limit]
 
 
-def _google_news(query: str, limit: int) -> list[dict]:
+def market_headlines(limit: int = 12) -> list[dict]:
+    news = _google_news("Sensex Nifty stock market", limit, days=7)
+    news.sort(key=lambda n: n["date"], reverse=True)
+    return news
+
+
+def _google_news(query: str, limit: int, days: int = 30) -> list[dict]:
     url = "https://news.google.com/rss/search?" + urlencode(
-        {"q": f"{query} share price when:30d", "hl": "en-IN", "gl": "IN", "ceid": "IN:en"})
+        {"q": f"{query} when:{days}d", "hl": "en-IN", "gl": "IN", "ceid": "IN:en"})
     try:
         with urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0"}), timeout=10) as resp:
             root = ElementTree.fromstring(resp.read())
