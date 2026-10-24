@@ -118,6 +118,18 @@ def pnl_calendar(daily: pd.Series, year: int, month: int) -> go.Figure:
     return fig
 
 
+def sparkline(path: pd.Series, reference: float | None = None, height: int = 70) -> go.Figure:
+    up = len(path) and path.iloc[-1] >= (reference if reference is not None else path.iloc[0])
+    color = UP if up else DOWN
+    fig = go.Figure(go.Scatter(x=path.index, y=path.values, mode="lines", line=dict(color=color, width=1.6),
+                               hovertemplate="%{x|%H:%M} ₹%{y:,.2f}<extra></extra>"))
+    if reference is not None:
+        fig.add_hline(y=reference, line=dict(color="#94a3b8", width=1, dash="dot"))
+    fig.update_layout(height=height, margin=dict(l=0, r=0, t=0, b=0), showlegend=False,
+                      xaxis=dict(visible=False), yaxis=dict(visible=False), hovermode="x")
+    return fig
+
+
 def equity_chart(curves: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     colors = {"Signals strategy": "#2563eb", "Signals + turbulence filter": "#16a34a", "Buy and hold": "#f59e0b",

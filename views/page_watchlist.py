@@ -12,25 +12,28 @@ NIFTY_TOP = ["RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "BHARTIARTL", "
 prefs = settings.load()
 book = portfolio.load()
 
-with st.sidebar:
-    st.subheader("Add stocks")
-    exchange = st.radio("Exchange", ["NSE", "BSE"], horizontal=True, key="wl_exchange")
-    nonce = st.session_state.get("wl_add_nonce", 0)
-    chosen = ui.stocks_multi_picker("Search and pick stocks", f"wl_add_{nonce}", exchange,
-                                    "Pick as many as you like, then click Add.")
-    if st.button("➕ Add to watchlist", disabled=not chosen):
-        added = portfolio.add_to_watchlist(chosen)
-        st.toast(f"Added {', '.join(ui.short(s) for s in added)}" if added else "Already on your watchlist")
-        st.session_state["wl_add_nonce"] = nonce + 1
-        st.rerun()
-    if st.button("Add NIFTY top 10"):
-        portfolio.add_to_watchlist([f"{s}.NS" for s in NIFTY_TOP])
-        st.rerun()
 cfg = ui.ai_sidebar(team_options=False, title="AI quick takes (optional)")
 st.sidebar.divider()
 st.sidebar.caption(ui.DISCLAIMER)
 
 st.title("⭐ Watchlist")
+
+with st.container(border=True):
+    st.markdown("**➕ Add stocks to your watchlist**")
+    nonce = st.session_state.get("wl_add_nonce", 0)
+    c1, c2 = st.columns([4, 1], vertical_alignment="bottom")
+    with c1:
+        chosen = ui.stocks_multi_picker("Search stocks", f"wl_add_{nonce}", "NSE",
+                                        "Type a company name, code or nickname; pick as many as you like.")
+    if c2.button("➕ Add", type="primary", width="stretch", disabled=not chosen):
+        added = portfolio.add_to_watchlist(chosen)
+        st.toast(f"Added {', '.join(ui.short(s) for s in added)}" if added else "Already on your watchlist")
+        st.session_state["wl_add_nonce"] = nonce + 1
+        st.rerun()
+    missing_top = [f"{s}.NS" for s in NIFTY_TOP if f"{s}.NS" not in book["watchlist"]]
+    if missing_top and st.button(f"Add NIFTY top 10 ({len(missing_top)} not yet added)"):
+        portfolio.add_to_watchlist(missing_top)
+        st.rerun()
 macro_rows = ui.get_macro()
 nifty = next((r for r in macro_rows if r["symbol"] == "^NSEI"), None)
 c1, c2, c3 = st.columns(3)
@@ -40,7 +43,7 @@ c2.metric("Market mood (India VIX)", macro.vix_mood(macro_rows) or "–")
 c3.metric("Stocks on watchlist", len(book["watchlist"]))
 
 if not book["watchlist"]:
-    st.info("Your watchlist is empty. Add stocks in the sidebar, or click **Add NIFTY top 10** to start.")
+    st.info("Your watchlist is empty. Search for stocks in the box above, or click **Add NIFTY top 10** to start.")
     st.stop()
 
 with st.spinner(f"Scanning {len(book['watchlist'])} stocks…"):

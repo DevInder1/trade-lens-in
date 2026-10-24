@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -80,6 +81,10 @@ def score(bars: pd.DataFrame, stats: dict) -> dict | None:
     one_sided = clean >= CLEAN_SHARE and ((move > 0 and last >= vwap) or (move < 0 and last <= vwap))
     strength = move / stats["adr"] if one_sided else 0.0
     elapsed = min(max(len(bars), 1), SESSION_MINUTES) / SESSION_MINUTES
+    previous = bars["Close"].shift(1).fillna(bars["Open"])
+    traded = bars["Close"] * volume
+    flow = float((traded * np.sign(bars["Close"] - previous)).sum()) / 1e7
+    turnover = float(traded.sum()) / 1e7
     return {
         "open": open_,
         "last": last,
@@ -93,6 +98,9 @@ def score(bars: pd.DataFrame, stats: dict) -> dict | None:
         "clean_pct": clean * 100,
         "efficiency_pct": efficiency * 100,
         "rel_volume": float(volume.sum()) / (stats["avg_volume"] * elapsed) if stats["avg_volume"] else None,
+        "flow_cr": flow,
+        "turnover_cr": turnover,
+        "flow_pct": flow / turnover * 100 if turnover else 0.0,
         "adr": stats["adr"],
         "updated": bars.index[-1],
     }
@@ -136,6 +144,19 @@ def boards(table: pd.DataFrame, size: int = 20) -> tuple[pd.DataFrame, pd.DataFr
     bull = table[table["strength"] > 0].sort_values("strength", ascending=False).head(size)
     bear = table[table["strength"] < 0].sort_values("strength").head(size)
     return bull.reset_index(drop=True), bear.reset_index(drop=True)
+
+
+def money_flow(table: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if table.empty:
+        return table, table
+    inflow = table[table["flow_cr"] > 0].sort_values("flow_cr", ascending=False).reset_index(drop=True)
+    outflow = table[table["flow_cr"] < 0].sort_values("flow_cr").reset_index(drop=True)
+    return inflow, outflow
+
+
+def intraday_path(minutes: pd.DataFrame, day, step: str = "5min") -> pd.Series:
+    bars = session_bars(minutes, day)
+    return bars["Close"].resample(step).last().dropna() if not bars.empty else pd.Series(dtype=float)
 
 
 def breadth(table: pd.DataFrame) -> dict:

@@ -36,6 +36,21 @@ One screen for the day: NIFTY, the India VIX fear gauge, **market turbulence**, 
 your watchlist ranked by momentum, the **momentum leaders** among F&O stocks, this month's journal P&L, your track
 record, and a glossary of terms.
 
+**💸 Where money is moving:** two live lists of F&O stocks, **🟢 Money coming in** and **🔴 Money going out**, 10 each
+with **Load 10 more** at the bottom. Each stock shows:
+
+- **Net money flow** in ₹ crore: value traded on up-ticks minus value traded on down-ticks, from 1-minute data. Its
+  turnover matches NSE's official figures within a few percent.
+- A **mini intraday chart**, with the day's open as a dotted line.
+- A **trading idea**: buy on a dip or sell on a rise near VWAP or an order-block zone, with stop-loss, target (the next
+  liquidity level or the day's high/low) and reward:risk. Confidence is **High** when money flow, a clean trend and a
+  zone all agree, and **Low** on choppy days. It says **Wait** when flow and price disagree, or when reward is smaller
+  than risk.
+- **Analyse →** and **⭐ Watchlist** buttons.
+
+The lists refresh every minute during market hours. Outside market hours they show the last session, and the ideas are
+for the next one. The ideas are rule-based, not advice.
+
 ### 📡 Terminal (intraday, F&O stocks)
 A live board of all ~210 F&O stocks (list downloaded from NSE), refreshed about once a minute during market hours.
 
@@ -69,8 +84,10 @@ information); fundamentals; news; sentiment (StockTwits and Reddit); market (VIX
 index-futures positioning, macro, headlines); your position with rule-based sizing; and the AI team.
 
 ### ⭐ Watchlist
-All your stocks in one table, sortable by **momentum** (most reliable) or signal score, with NSE delivery %, F&O
-build-up, RSI, signals, your P&L and the last AI call. With AI, run a quick take on every stock in one click.
+Add stocks with the **➕ Add stocks** box at the top of the page: search by name, code or nickname, pick several, and
+click **Add**, or add the NIFTY top 10 in one click. All your stocks appear in one table, sortable by **momentum**
+(most reliable) or signal score, with NSE delivery %, F&O build-up, RSI, signals, your P&L and the last AI call. With
+AI, run a quick take on every stock in one click.
 
 ### 🧺 Portfolio (from FinRL's portfolio-allocation baselines)
 How to split money across several stocks: **Equal weight**, **Lowest risk** (minimum variance), **Best return per
@@ -196,7 +213,8 @@ presents them as research, not a trading tool.
 | `scanner.py` | Watchlist scanner |
 | `daily_report.py` / `scheduler.py` | Daily report and its Mac schedule |
 | `market.py`, `macro.py`, `social.py` | Prices, fundamentals, news, macro and sentiment data |
-| `fno.py`, `intraday.py`, `zones.py` | F&O universe and market calendar, intraday strength boards, order blocks and liquidity |
+| `fno.py`, `intraday.py`, `zones.py` | F&O universe and market calendar, intraday strength boards and money flow, order blocks and liquidity |
 | `journal.py` | Trading journal |
+| `ideas.py` | Rule-based trading ideas for the money-flow lists |
 | `indicators.py`, `charts.py` | Indicators, signals and charts |
 | `portfolio.py`, `settings.py`, `storage.py` | Your saved data and preferences |
