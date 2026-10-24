@@ -1,7 +1,6 @@
 import streamlit as st
 
 import macro
-import market
 import portfolio
 import research
 import settings
@@ -16,10 +15,13 @@ book = portfolio.load()
 with st.sidebar:
     st.subheader("Add stocks")
     exchange = st.radio("Exchange", ["NSE", "BSE"], horizontal=True, key="wl_exchange")
-    raw = st.text_input("Symbols (comma separated)", placeholder="TCS, INFY, NIFTY 50", key="wl_add")
-    if st.button("➕ Add to watchlist", disabled=not raw.strip()):
-        added = portfolio.add_to_watchlist([market.normalize_symbol(s, exchange) for s in raw.split(",") if s.strip()])
-        st.toast(f"Added {', '.join(added)}" if added else "Already on your watchlist")
+    nonce = st.session_state.get("wl_add_nonce", 0)
+    chosen = ui.stocks_multi_picker("Search and pick stocks", f"wl_add_{nonce}", exchange,
+                                    "Pick as many as you like, then click Add.")
+    if st.button("➕ Add to watchlist", disabled=not chosen):
+        added = portfolio.add_to_watchlist(chosen)
+        st.toast(f"Added {', '.join(ui.short(s) for s in added)}" if added else "Already on your watchlist")
+        st.session_state["wl_add_nonce"] = nonce + 1
         st.rerun()
     if st.button("Add NIFTY top 10"):
         portfolio.add_to_watchlist([f"{s}.NS" for s in NIFTY_TOP])

@@ -16,19 +16,20 @@ OWNERSHIP = ["Not saying", "No", "Yes"]
 
 prefs = settings.load()
 if "goto_symbol" in st.session_state:
-    target = st.session_state.pop("goto_symbol")
-    st.session_state["symbol_query"] = target
-    st.session_state["symbol_exchange"] = "BSE" if target.endswith(".BO") else "NSE"
-st.session_state.setdefault("symbol_query", prefs["last_query"])
+    ui.pick("analyse", st.session_state.pop("goto_symbol"), "symbol_exchange")
 st.session_state.setdefault("symbol_exchange", prefs["last_exchange"])
 
 book = portfolio.load()
 
 with st.sidebar:
     st.subheader("1. Pick a stock")
-    exchange = st.radio("Exchange", ["NSE", "BSE"], horizontal=True, key="symbol_exchange")
-    query = st.text_input("Symbol or index", key="symbol_query",
-                          help="Examples: RELIANCE, TCS, HDFCBANK, INFY, TATAMOTORS, NIFTY 50, BANK NIFTY, SENSEX")
+    query = ui.stock_picker("analyse", prefs["last_query"])
+    viewing = market.normalize_symbol(query, st.session_state["symbol_exchange"])
+    ui.quick_picks("analyse", [s for s in book["watchlist"] if s != viewing], "⭐ Your watchlist", "symbol_exchange")
+    ui.quick_picks("analyse", [s for s in prefs["recent"] if s not in book["watchlist"] and s != viewing][:6],
+                   "🕘 Recently viewed", "symbol_exchange")
+    exchange = st.radio("Exchange", ["NSE", "BSE"], horizontal=True, key="symbol_exchange",
+                        help="Where prices come from. NSE works for almost every stock.")
     period_label = st.selectbox("Chart period", list(PERIODS), index=2)
     symbol = market.normalize_symbol(query, exchange)
     settings.update(last_query=query, last_exchange=exchange)
@@ -70,7 +71,7 @@ st.sidebar.divider()
 st.sidebar.caption(ui.DISCLAIMER)
 
 if not symbol:
-    st.info("Type a stock symbol in the sidebar to begin.")
+    st.info("Pick a stock or index in the sidebar to begin: start typing a company name, e.g. *Tata Motors*.")
     st.stop()
 
 try:
@@ -78,8 +79,9 @@ try:
         df = ui.get_prices(symbol, "5y" if PERIODS[period_label] > 24 else "2y")
 except Exception as exc:
     st.error(f"Could not load prices for **{symbol}**: {exc}")
-    st.caption("Tip: use the NSE code (e.g. HDFCBANK, not HDFC Bank). Switch to BSE if the stock is only listed there.")
+    st.caption("Tip: pick the stock from the list in the sidebar. If it trades only on BSE, switch Exchange to BSE.")
     st.stop()
+settings.remember_recent(symbol)
 
 with st.spinner("Loading fundamentals, news, sentiment, official NSE data and market data…"):
     fundamentals = {} if market.is_index(symbol) else ui.get_fundamentals(symbol)

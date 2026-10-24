@@ -9,7 +9,7 @@ from urllib.request import Request, urlopen
 import pandas as pd
 
 import fno
-from storage import DATA_DIR, ensure_dirs
+from storage import DATA_DIR, ensure_dirs, read_json, write_json
 
 CACHE_DIR = DATA_DIR / "nse"
 BASE = "https://nsearchives.nseindia.com"
@@ -76,6 +76,25 @@ def recent_days(kind: str, count: int = 1, max_back: int = 45) -> list[tuple[dat
         if len(out) >= count:
             break
     return sorted(out, key=lambda item: item[0], reverse=True)[:count]
+
+
+LISTED_URL = BASE + "/content/equities/EQUITY_L.csv"
+LISTED_PATH = DATA_DIR / "nse_listed.json"
+
+
+def listed_stocks() -> dict[str, str]:
+    saved = read_json(LISTED_PATH, {})
+    if saved.get("stocks") and time.time() - saved.get("saved", 0) < 7 * 24 * 3600:
+        return saved["stocks"]
+    try:
+        raw = urlopen(Request(LISTED_URL, headers={"User-Agent": "Mozilla/5.0"}), timeout=20).read()
+        df = pd.read_csv(io.BytesIO(raw))
+        df.columns = [c.strip() for c in df.columns]
+        stocks = {str(s).strip(): str(n).strip() for s, n in zip(df["SYMBOL"], df["NAME OF COMPANY"])}
+    except Exception:
+        return saved.get("stocks") or {s["symbol"]: s["name"] for s in fno.universe()}
+    write_json(LISTED_PATH, {"saved": time.time(), "stocks": stocks})
+    return stocks
 
 
 def _equity_frame(raw: bytes) -> pd.DataFrame:

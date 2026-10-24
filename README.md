@@ -56,7 +56,10 @@ a fair-value gap or travels at least one average candle beyond the block). Only 
 **Liquidity** = swing highs/lows no candle has traded through yet.
 
 ### 📊 Analyse
-One stock in depth. Under the name, a **✅ Verified** line confirms Yahoo's price matches **NSE's official closing
+One stock in depth. Pick it from a **searchable list of all 2,600+ NSE-listed stocks and the main indices**: start
+typing a company name or code (e.g. *tata*), or click one of your **⭐ watchlist** or **🕘 recently viewed** stocks.
+You can also type any Yahoo symbol, such as a BSE code. The same search is used on the Backtest page, and for adding
+stocks on the Watchlist and Portfolio pages (pick several at once). Under the name, a **✅ Verified** line confirms Yahoo's price matches **NSE's official closing
 price** (or warns you if it doesn't). Eight tabs: chart; signals with an **evidence** section (12-month momentum and its
 rank among F&O stocks, NSE delivery % with a 20-session chart, F&O build-up and put-call ratio, ADX/CCI for
 information); fundamentals; news; sentiment (StockTwits and Reddit); market (VIX, turbulence chart, FII/DII/Pro/Client

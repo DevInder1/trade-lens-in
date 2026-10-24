@@ -13,7 +13,13 @@ DEFAULTS = {
     "report_minute": 30,
     "last_query": "RELIANCE",
     "last_exchange": "NSE",
+    "recent": [],
 }
+
+
+def remember_recent(symbol: str, limit: int = 8) -> None:
+    recent = [s for s in load()["recent"] if s != symbol]
+    update(recent=[symbol, *recent][:limit])
 
 
 def load() -> dict:

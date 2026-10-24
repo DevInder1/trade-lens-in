@@ -335,3 +335,77 @@ def decisions_table(rows: list[dict], progress: dict | None = None, show_symbol:
 def go_analyse(symbol: str):
     st.session_state["goto_symbol"] = symbol
     st.switch_page("views/page_analyse.py")
+
+
+INDEX_CHOICES = ["NIFTY 50", "BANK NIFTY", "SENSEX", "NIFTY IT", "NIFTY AUTO", "NIFTY PHARMA", "NIFTY FMCG",
+                 "NIFTY METAL"]
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def get_stock_options() -> dict:
+    options = {f"{name} (index)": name for name in INDEX_CHOICES}
+    for symbol, company in sorted(nse.listed_stocks().items()):
+        options[f"{symbol} — {company}"] = symbol
+    return options
+
+
+def _index_name(symbol: str) -> str | None:
+    target = market.INDICES.get(symbol, symbol)
+    return next((name for name in INDEX_CHOICES if market.INDICES[name] == target), None)
+
+
+def _label_for(code: str) -> str:
+    by_value = {value: label for label, value in get_stock_options().items()}
+    base = code.upper().removesuffix(".NS")
+    if base in by_value:
+        return by_value[base]
+    index = _index_name(base)
+    return f"{index} (index)" if index else code
+
+
+def short(symbol: str) -> str:
+    return _index_name(symbol) or symbol.removesuffix(".NS")
+
+
+def stock_picker(key: str, default: str) -> str:
+    options = get_stock_options()
+    state = f"{key}_pick"
+    if state not in st.session_state:
+        st.session_state[state] = _label_for(default) if default else None
+    labels = list(options)
+    current = st.session_state.get(state)
+    if current and current not in options:
+        labels = [current, *labels]
+    choice = st.selectbox("Stock or index", labels, key=state, accept_new_options=True,
+                          placeholder="Type a company name or NSE code…",
+                          help="Search all 2,600+ NSE-listed stocks and the main indices by name or code. You can also "
+                               "type any Yahoo symbol, e.g. 500325.BO for a BSE code.")
+    return options.get(choice, choice or "")
+
+
+def pick(key: str, symbol: str, exchange_key: str | None = None):
+    st.session_state[f"{key}_pick"] = _label_for(symbol)
+    if exchange_key:
+        st.session_state[exchange_key] = "BSE" if symbol.endswith(".BO") else "NSE"
+
+
+def quick_picks(key: str, symbols: list[str], label: str, exchange_key: str | None = None):
+    symbols = list(dict.fromkeys(symbols))
+    if not symbols:
+        return
+    pill_key = f"{key}_pills_{label}"
+
+    def chosen():
+        value = st.session_state.get(pill_key)
+        if value:
+            pick(key, value, exchange_key)
+        st.session_state[pill_key] = None
+
+    st.pills(label, symbols, key=pill_key, format_func=short, on_change=chosen)
+
+
+def stocks_multi_picker(label: str, key: str, exchange: str = "NSE", help_text: str | None = None) -> list[str]:
+    options = get_stock_options()
+    chosen = st.multiselect(label, list(options), key=key, accept_new_options=True,
+                            placeholder="Type company names or codes…", help=help_text)
+    return [market.normalize_symbol(options.get(c, c), exchange) for c in chosen]

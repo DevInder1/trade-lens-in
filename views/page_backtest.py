@@ -6,6 +6,7 @@ import ai
 import backtest
 import charts
 import market
+import portfolio
 import research
 import settings
 import track
@@ -14,8 +15,9 @@ import ui
 prefs = settings.load()
 with st.sidebar:
     st.subheader("Backtest settings")
+    query = ui.stock_picker("backtest", prefs["last_query"])
+    ui.quick_picks("backtest", [*portfolio.load()["watchlist"], *prefs["recent"]][:10], "Quick pick", "bt_exchange")
     exchange = st.radio("Exchange", ["NSE", "BSE"], horizontal=True, key="bt_exchange")
-    query = st.text_input("Symbol or index", value=prefs["last_query"], key="bt_query")
     years = st.selectbox("Years of history", [1, 2, 5], index=1)
     horizon = st.selectbox("Judge each call after (trading days)", [10, 20, 40, 60],
                            index=[10, 20, 40, 60].index(prefs["horizon_days"]) if prefs["horizon_days"] in
@@ -30,7 +32,7 @@ st.sidebar.caption(ui.DISCLAIMER)
 symbol = market.normalize_symbol(query, exchange)
 st.title("⏪ Backtest")
 if not symbol:
-    st.info("Type a symbol in the sidebar.")
+    st.info("Pick a stock or index in the sidebar.")
     st.stop()
 
 st.subheader(f"1. Rule-based signals on {symbol} (no AI)")

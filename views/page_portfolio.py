@@ -2,14 +2,13 @@ import plotly.express as px
 import streamlit as st
 
 import charts
-import market
 import optimizer
 import portfolio
 import ui
 
 book = portfolio.load()
 held = [s for s, p in book["positions"].items() if p.get("owned") == "Yes"]
-default = book["watchlist"] or held
+default = [s for s in (book["watchlist"] or held) if not s.startswith("^")]
 
 with st.sidebar:
     st.subheader("Portfolio settings")
@@ -30,15 +29,8 @@ st.title("🧺 Portfolio")
 st.caption("How to split money across several stocks. Based on the portfolio-allocation baselines in the FinRL "
            "research framework: every method is checked on recent data it never saw.")
 
-c1, c2 = st.columns([3, 1])
-exchange = c2.radio("Exchange", ["NSE", "BSE"], horizontal=True, label_visibility="collapsed")
-extra = c1.text_input("Add stocks (comma separated)", placeholder="e.g. TCS, ITC, HAL")
-symbols = st.multiselect("Stocks in the portfolio", sorted(set(default) | set(st.session_state.get("pf_extra", []))),
-                         default=default)
-if extra.strip():
-    added = [market.normalize_symbol(s, exchange) for s in extra.split(",") if s.strip()]
-    st.session_state["pf_extra"] = sorted(set(st.session_state.get("pf_extra", [])) | set(added))
-    symbols = sorted(set(symbols) | set(added))
+symbols = st.multiselect("Stocks from your watchlist and holdings", default, default=default, format_func=ui.short)
+symbols = sorted(set(symbols) | set(ui.stocks_multi_picker("Add any other stocks", "pf_add")))
 symbols = [s for s in symbols if not s.startswith("^")]
 
 if len(symbols) < 2:
