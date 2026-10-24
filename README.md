@@ -1,7 +1,7 @@
 # Trade Lens IN
 
 A private research app for Indian stocks (NSE / BSE), modelled on the TradingAgents multi-agent framework.
-Analyse a stock, keep a watchlist, let a team of AI agents make decisions that fit your position, keep score of
+Watch every F&O stock live, analyse a stock, keep a watchlist and a trading journal, let a team of AI agents make decisions that fit your position, keep score of
 every call, learn from mistakes, test ideas on past dates, and get a report every evening.
 
 **It is read-only.** It never connects to a broker, never places trades, and runs only on your Mac
@@ -30,6 +30,33 @@ cd ~/claude/trading-assistant && .venv/bin/streamlit run app.py
 One stock in depth, in eight tabs: chart, signals, fundamentals, news, sentiment (StockTwits and Reddit), market
 (NIFTY, India VIX, USD/INR, crude, gold, US markets), your position with rule-based position sizing, and the AI team.
 Add the stock to your watchlist from the sidebar.
+
+### 📡 Terminal (intraday, F&O stocks)
+A live board of all ~210 F&O stocks (list downloaded from NSE), refreshed about once a minute during market hours.
+
+- **Strength** = move since the open ÷ the stock's normal daily range (average of the last 20 sessions). It only
+  counts when the move is clean: at least 70% of the day's range on the side of the move, with price on the right
+  side of VWAP. Otherwise the stock is **Choppy** and scores zero.
+- **Bullish and Bearish boards**: the strongest 10/20/30 each side, with rank-change markers (▲▼, 🆕 for new top-10
+  entries), the current order-block zone and the next level.
+- **Breadth bar** (up vs down) and **Market X-Ray**: every F&O stock as a dot at its day's move, grouped by sector,
+  with the leading and lagging sectors. **Sector flow** ranks sectors by average strength.
+- **Popup chart**: click any row (or search any F&O stock) for a 5-minute chart with every order-block zone drawn where
+  it formed (broken ones greyed), liquidity lines at untaken swing highs/lows (equal highs/lows thicker), the level
+  where the setup fails, the next two levels, and up to three higher-timeframe levels behind it (previous day/week
+  high and low, daily order blocks). Step through stocks with Previous / Next, add to the watchlist, or log a trade.
+- Weekends and holidays show the last session's closing board with a clear label.
+
+How zones are found (our own implementation of standard order-block ideas): an **order block** is the last
+opposite-colour candle before a move that *closes* beyond a recent swing high/low, and the move must be fast (it leaves
+a fair-value gap or travels at least one average candle beyond the block). Only finished 5-minute candles are used.
+A zone is broken when a 5-minute candle closes through it. **Liquidity** = swing highs/lows no candle has traded
+through yet.
+
+### 📒 Journal
+Log trades (symbol, Long/Short, quantity, entry, exit, From and To dates, charges, setup tag, note). See realised P&L,
+win rate, profit factor, average win/loss, **which setups pay**, a **P&L calendar heatmap** and cumulative P&L. Close
+open trades later, delete trades, export to CSV. Click 📒 Journal on any Terminal chart to start a trade pre-filled.
 
 ### ⭐ Watchlist
 All your stocks in one table, strongest signals first: price, 1-day and 1-month change, performance vs NIFTY, RSI,
@@ -102,6 +129,8 @@ Everything you enter or the app records stays in the `data/` folder on your Mac 
 | `data/portfolio.json` | Watchlist, positions, capital, risk per trade |
 | `data/settings.json` | AI choice, judging horizon, report schedule |
 | `data/track_record.db` | Every saved call, its result and lessons |
+| `data/journal.db` | Your trading journal |
+| `data/fno_universe.json`, `data/fno_sectors.json` | Cached F&O stock list and sectors (refreshed weekly) |
 | `data/reports/` | Daily reports |
 | `data/logs/daily.log` | Log of scheduled runs |
 
@@ -113,8 +142,10 @@ Everything you enter or the app records stays in the `data/` folder on your Mac 
   past calls. Nothing else about you.
 - The server listens only on `localhost`, so other devices on your Wi-Fi can't open it.
 - Streamlit's usage statistics are turned off.
-- Prices come from Yahoo Finance and can be delayed. Social posts are noisy. AI can be wrong, and backtests don't
-  guarantee the future. Check before you act.
+- Prices come from Yahoo Finance and can be delayed (intraday by a minute or two). Social posts are noisy. AI can be
+  wrong, and backtests don't guarantee the future. Strength, zones and levels are calculations, not recommendations.
+  Most F&O traders lose money: SEBI's studies found about 9 in 10 individual F&O traders made net losses.
+  Check before you act.
 
 ## Files
 
@@ -130,5 +161,7 @@ Everything you enter or the app records stays in the `data/` folder on your Mac 
 | `scanner.py` | Watchlist scanner |
 | `daily_report.py` / `scheduler.py` | Daily report and its Mac schedule |
 | `market.py`, `macro.py`, `social.py` | Prices, fundamentals, news, macro and sentiment data |
+| `fno.py`, `intraday.py`, `zones.py` | F&O universe and market calendar, intraday strength boards, order blocks and liquidity |
+| `journal.py` | Trading journal storage and statistics |
 | `indicators.py`, `charts.py` | Indicators, signals and charts |
 | `portfolio.py`, `settings.py`, `storage.py` | Your saved data and preferences |

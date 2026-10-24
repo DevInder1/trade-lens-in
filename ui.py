@@ -7,7 +7,9 @@ from dotenv import set_key, unset_key
 
 import ai
 import backtest
+import fno
 import indicators
+import intraday
 import macro
 import market
 import portfolio
@@ -69,6 +71,26 @@ def refresh_track(_stamp: str):
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_backtest(symbol, years, horizon):
     return backtest.signal_backtest(symbol, years, horizon)
+
+
+@st.cache_resource(ttl=6 * 3600, show_spinner=False)
+def get_fno_daily(day_key: str):
+    return intraday.load_daily(intraday.tickers())
+
+
+@st.cache_resource(ttl=55, show_spinner=False)
+def _terminal(bucket: str):
+    minutes = intraday.load_minutes(intraday.tickers(), "2d")
+    return intraday.snapshot(minutes=minutes, daily=get_fno_daily(fno.now_ist().strftime("%Y-%m-%d")))
+
+
+def get_terminal(force: bool = False):
+    now = fno.now_ist()
+    in_hours = now.weekday() < 5 and (9, 0) <= (now.hour, now.minute) <= (15, 45)
+    bucket = now.strftime("%Y-%m-%d %H:%M") if in_hours else now.strftime("%Y-%m-%d %H")
+    if force:
+        _terminal.clear()
+    return _terminal(bucket)
 
 
 def scan_watchlist(book: dict):
