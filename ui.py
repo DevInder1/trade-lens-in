@@ -1,3 +1,4 @@
+import difflib
 import json
 import os
 from datetime import datetime
@@ -367,6 +368,69 @@ def short(symbol: str) -> str:
     return _index_name(symbol) or symbol.removesuffix(".NS")
 
 
+NICKNAMES = {"L&T": "LT", "LNT": "LT", "ZOMATO": "ETERNAL", "AIRTEL": "BHARTIARTL", "SBI": "SBIN", "HUL": "HINDUNILVR",
+             "KOTAK": "KOTAKBANK", "LIC": "LICI", "BAJAJ FINANCE": "BAJFINANCE", "ASIAN PAINTS": "ASIANPAINT",
+             "SUN PHARMA": "SUNPHARMA", "DR REDDY": "DRREDDY", "BANKNIFTY": "BANK NIFTY", "NIFTY": "NIFTY 50"}
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _popular() -> set:
+    return {s["symbol"] for s in fno.universe()} | set(INDEX_CHOICES)
+
+
+def search_stocks(text: str, limit: int = 6) -> list[str]:
+    query = " ".join(text.upper().replace("—", " ").split())
+    if not query:
+        return []
+    alias = NICKNAMES.get(query)
+    popular = _popular()
+    scored = []
+    for label, code in get_stock_options().items():
+        upper = label.upper()
+        if code.upper() in (query, alias):
+            rank = 0
+        elif upper.startswith(query):
+            rank = 1
+        elif f" {query}" in f" {upper}":
+            rank = 2
+        elif query in upper or query.replace(" ", "") in upper.replace(" ", ""):
+            rank = 3
+        elif all(word in upper for word in query.split()):
+            rank = 4
+        else:
+            continue
+        scored.append((rank > 0, code not in popular, rank, len(label), label))
+    if not scored:
+        return _close_matches(query, limit)
+    return [item[-1] for item in sorted(scored)[:limit]]
+
+
+@st.cache_data(ttl=24 * 3600, show_spinner=False)
+def _word_index() -> dict:
+    index = {}
+    for label, code in get_stock_options().items():
+        name = label.split(" — ")[-1].removesuffix(" (index)")
+        for word in {code.upper(), *name.upper().replace("&", " ").split()}:
+            if len(word) >= 3:
+                index.setdefault(word, []).append(label)
+    return index
+
+
+def _close_matches(query: str, limit: int) -> list[str]:
+    index = _word_index()
+    popular = _popular()
+    options = get_stock_options()
+    hits: dict[str, int] = {}
+    for word in query.split():
+        matched = set()
+        for close in difflib.get_close_matches(word, list(index), n=8, cutoff=0.75):
+            matched.update(index[close])
+        for label in matched:
+            hits[label] = hits.get(label, 0) + 1
+    ranked = sorted(hits, key=lambda label: (-hits[label], options[label] not in popular, len(label)))
+    return ranked[:limit]
+
+
 def stock_picker(key: str, default: str) -> str:
     options = get_stock_options()
     state = f"{key}_pick"
@@ -378,9 +442,31 @@ def stock_picker(key: str, default: str) -> str:
         labels = [current, *labels]
     choice = st.selectbox("Stock or index", labels, key=state, accept_new_options=True,
                           placeholder="Type a company name or NSE code…",
-                          help="Search all 2,600+ NSE-listed stocks and the main indices by name or code. You can also "
-                               "type any Yahoo symbol, e.g. 500325.BO for a BSE code.")
-    return options.get(choice, choice or "")
+                          help="Type any part of a company name or code (e.g. 'infosys', 'hdfc bank', 'steel') and pick "
+                               "from the list. Covers all 2,600+ NSE-listed stocks and the main indices. A Yahoo symbol "
+                               "such as 500325.BO (a BSE code) also works.")
+    if not choice or choice in options:
+        return options.get(choice, "")
+    if "." in choice or choice.startswith("^"):
+        return choice.strip()
+    matches = search_stocks(choice)
+    if not matches:
+        st.caption(f"No NSE stock matches “{choice}”. Check the spelling or try the company's NSE code.")
+        return ""
+    exact = any(choice.upper() in m.upper() for m in matches[:1])
+    st.caption(f"🔎 {'Best match' if exact else 'Closest spelling'} for “{choice}”: **{matches[0]}**")
+    if len(matches) > 1:
+        pill_key = f"{key}_matches"
+
+        def chosen():
+            value = st.session_state.get(pill_key)
+            if value:
+                st.session_state[state] = value
+            st.session_state[pill_key] = None
+
+        st.pills("Did you mean", matches[1:], key=pill_key, on_change=chosen,
+                 format_func=lambda label: label.split(" — ")[0] if " — " in label else label)
+    return options[matches[0]]
 
 
 def pick(key: str, symbol: str, exchange_key: str | None = None):

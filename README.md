@@ -58,6 +58,9 @@ a fair-value gap or travels at least one average candle beyond the block). Only 
 ### 📊 Analyse
 One stock in depth. Pick it from a **searchable list of all 2,600+ NSE-listed stocks and the main indices**: start
 typing a company name or code (e.g. *tata*), or click one of your **⭐ watchlist** or **🕘 recently viewed** stocks.
+Whatever you type works as a search, even if you just press Enter: it handles nicknames (*L&T*, *Zomato*, *SBI*,
+*Airtel*) and spelling mistakes (*infosis*, *hdfc bnak*), opens the best match and offers other matches as one-click
+buttons.
 You can also type any Yahoo symbol, such as a BSE code. The same search is used on the Backtest page, and for adding
 stocks on the Watchlist and Portfolio pages (pick several at once). Under the name, a **✅ Verified** line confirms Yahoo's price matches **NSE's official closing
 price** (or warns you if it doesn't). Eight tabs: chart; signals with an **evidence** section (12-month momentum and its

@@ -32,7 +32,8 @@ with st.sidebar:
                         help="Where prices come from. NSE works for almost every stock.")
     period_label = st.selectbox("Chart period", list(PERIODS), index=2)
     symbol = market.normalize_symbol(query, exchange)
-    settings.update(last_query=query, last_exchange=exchange)
+    if query:
+        settings.update(last_query=query, last_exchange=exchange)
     if symbol:
         if symbol in book["watchlist"]:
             if st.button("☆ Remove from watchlist"):
