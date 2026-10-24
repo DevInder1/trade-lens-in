@@ -1,14 +1,15 @@
 # Trade Lens IN
 
-A private research app for Indian stocks (NSE / BSE), modelled on the TradingAgents multi-agent framework.
-Watch every F&O stock live, analyse a stock, keep a watchlist and a trading journal, let a team of AI agents make decisions that fit your position, keep score of
-every call, learn from mistakes, test ideas on past dates, and get a report every evening.
+A private research app for Indian stocks (NSE / BSE). It combines ideas from three projects:
+**TradingAgents** (a team of AI analysts that debate), **FinRL** (risk switches, portfolio allocation and proper
+backtest statistics) and **OrderBlock** (live F&O strength boards with order-block zones), rebuilt with free and
+official Indian data.
 
 **It is read-only.** It never connects to a broker, never places trades, and runs only on your Mac
 (`http://localhost:8501`). For education and research, not financial advice.
 
-Everything works **without an AI key** (charts, signals, scanner, rule-based backtest, track record, daily report).
-An AI key from Gemini, Claude or OpenAI adds the written analysis and decisions.
+Everything works **without an AI key**. For the AI team, the easiest option is **Ollama**: free, private and
+unlimited, running on your own Mac.
 
 ## Start it
 
@@ -24,12 +25,16 @@ Or from Terminal:
 cd ~/claude/trading-assistant && .venv/bin/streamlit run app.py
 ```
 
+The first page you open each day takes 30–40 seconds while market data loads; after that pages open in seconds.
+
 ## Pages
 
-### 📊 Analyse
-One stock in depth, in eight tabs: chart, signals, fundamentals, news, sentiment (StockTwits and Reddit), market
-(NIFTY, India VIX, USD/INR, crude, gold, US markets), your position with rule-based position sizing, and the AI team.
-Add the stock to your watchlist from the sidebar.
+The menu is grouped into **Today**, **Research** and **Review**.
+
+### 🏠 Home
+One screen for the day: NIFTY, the India VIX fear gauge, **market turbulence**, **FII index-futures positioning**,
+your watchlist ranked by momentum, the **momentum leaders** among F&O stocks, this month's journal P&L, your track
+record, and a glossary of terms.
 
 ### 📡 Terminal (intraday, F&O stocks)
 A live board of all ~210 F&O stocks (list downloaded from NSE), refreshed about once a minute during market hours.
@@ -37,60 +42,71 @@ A live board of all ~210 F&O stocks (list downloaded from NSE), refreshed about 
 - **Strength** = move since the open ÷ the stock's normal daily range (average of the last 20 sessions). It only
   counts when the move is clean: at least 70% of the day's range on the side of the move, with price on the right
   side of VWAP. Otherwise the stock is **Choppy** and scores zero.
-- **Bullish and Bearish boards**: the strongest 10/20/30 each side, with rank-change markers (▲▼, 🆕 for new top-10
-  entries), the current order-block zone and the next level.
-- **Breadth bar** (up vs down) and **Market X-Ray**: every F&O stock as a dot at its day's move, grouped by sector,
-  with the leading and lagging sectors. **Sector flow** ranks sectors by average strength.
-- **Popup chart**: click any row (or search any F&O stock) for a 5-minute chart with every order-block zone drawn where
-  it formed (broken ones greyed), liquidity lines at untaken swing highs/lows (equal highs/lows thicker), the level
-  where the setup fails, the next two levels, and up to three higher-timeframe levels behind it (previous day/week
-  high and low, daily order blocks). Step through stocks with Previous / Next, add to the watchlist, or log a trade.
-- Weekends and holidays show the last session's closing board with a clear label.
+- **Bullish and Bearish boards** with rank-change markers (▲▼, 🆕), the current order-block zone and the next level.
+- **Breadth bar**, **Market X-Ray** (every F&O stock as a dot at its day's move, by sector) and **Sector flow**.
+- **F&O positioning (end of day, NSE official)**: long build-up, short build-up, short covering and long unwinding
+  counts, the biggest movers in each, and NIFTY / Bank NIFTY put-call ratio.
+- **Popup chart**: click any row for a 5-minute chart with order-block zones drawn where they formed, liquidity lines,
+  the level where the setup fails, the next two levels, up to three higher-timeframe levels behind it, and the stock's
+  F&O build-up.
 
 How zones are found (our own implementation of standard order-block ideas): an **order block** is the last
 opposite-colour candle before a move that *closes* beyond a recent swing high/low, and the move must be fast (it leaves
 a fair-value gap or travels at least one average candle beyond the block). Only finished 5-minute candles are used.
-A zone is broken when a 5-minute candle closes through it. **Liquidity** = swing highs/lows no candle has traded
-through yet.
+**Liquidity** = swing highs/lows no candle has traded through yet.
 
-### 📒 Journal
-Log trades (symbol, Long/Short, quantity, entry, exit, From and To dates, charges, setup tag, note). See realised P&L,
-win rate, profit factor, average win/loss, **which setups pay**, a **P&L calendar heatmap** and cumulative P&L. Close
-open trades later, delete trades, export to CSV. Click 📒 Journal on any Terminal chart to start a trade pre-filled.
+### 📊 Analyse
+One stock in depth. Under the name, a **✅ Verified** line confirms Yahoo's price matches **NSE's official closing
+price** (or warns you if it doesn't). Eight tabs: chart; signals with an **evidence** section (12-month momentum and its
+rank among F&O stocks, NSE delivery % with a 20-session chart, F&O build-up and put-call ratio, ADX/CCI for
+information); fundamentals; news; sentiment (StockTwits and Reddit); market (VIX, turbulence chart, FII/DII/Pro/Client
+index-futures positioning, macro, headlines); your position with rule-based sizing; and the AI team.
 
 ### ⭐ Watchlist
-All your stocks in one table, strongest signals first: price, 1-day and 1-month change, performance vs NIFTY, RSI,
-signal view, your P&L and the last AI call. **Add NIFTY top 10** gets you started. With AI, run a quick take on every
-stock in one click (one AI call per stock).
+All your stocks in one table, sortable by **momentum** (most reliable) or signal score, with NSE delivery %, F&O
+build-up, RSI, signals, your P&L and the last AI call. With AI, run a quick take on every stock in one click.
+
+### 🧺 Portfolio (from FinRL's portfolio-allocation baselines)
+How to split money across several stocks: **Equal weight**, **Lowest risk** (minimum variance), **Best return per
+risk** (maximum Sharpe) or **Equal risk** (risk parity), with a cap on any one stock. Shows the weights, how many whole
+shares to buy with your capital, and an **honest check**: the weights are fitted on older data and tested on the most
+recent third, which the method never saw, against equal weight and NIFTY. Plus a correlation heatmap.
+
+### 📒 Journal
+Log trades (Long/Short, quantity, entry, exit, From and To dates, charges, setup tag, note). See realised P&L, win rate,
+profit factor, **which setups pay**, a **P&L calendar heatmap** and cumulative P&L. Export to CSV.
 
 ### 🎯 Track record (with memory)
-Every AI decision, and each day's signal view for your watchlist, is saved and judged automatically after 20 trading
-days (you can choose 10–60):
-
-- **Buy / Overweight / Bullish** is right if the stock beats NIFTY 50.
-- **Sell / Underweight / Bearish** is right if it lags NIFTY.
-- **Hold / Neutral** is right if it stays within ±3% of NIFTY.
-
-You see the hit rate and average performance vs NIFTY for each source (signals, AI team, AI quick, AI backtest).
-With AI, the team writes a short lesson on each judged call. Past calls and lessons are given to the Trader and
-Portfolio Manager on the next run, so the team learns from its record.
+Every AI decision, and each day's signal view for your watchlist, is saved and judged after 20 trading days (10–60):
+Buy/Overweight/Bullish is right if the stock beats NIFTY; Sell/Underweight/Bearish if it lags; Hold/Neutral if it
+stays within ±3% of NIFTY. With AI, the team writes a lesson on each judged call and is reminded of them next time.
 
 ### ⏪ Backtest
-- **Rule-based (no AI):** for every day in the last 1–5 years, what the signals said and what happened next. Shows the
-  hit rate for each view, and a strategy that is in the stock only when signals are Bullish vs buy-and-hold vs NIFTY.
-- **AI on past dates:** runs the AI team as if it were a past date, using only prices, macro data and headlines up to
-  that date, then judges the call immediately. Pick several monthly dates or one specific date.
+- **Rule-based (no AI):** what the signals said each day and what happened next, with a full **statistics table**
+  (total return, CAGR, volatility, Sharpe, Sortino, Calmar, max drawdown, up days, best/worst day, VaR) for the
+  strategy, the strategy with FinRL's **turbulence filter** (cash in the most turbulent 10% of days), buy-and-hold and
+  NIFTY.
+- **AI on past dates:** runs the AI team as if it were a past date, using only data available then, and judges it.
 
 ### 🗞️ Daily report
-Turn on a report every weekday after market close (default 4:30 PM). It scans your watchlist, saves signal views,
-judges older calls, lists signals that changed, and can include an AI quick take per stock. You get a Mac notification
-when it's ready. If the Mac is asleep at that time, it runs when it wakes. **Create a report now** runs it immediately.
-Turning it off removes the scheduled job completely.
+A report every weekday after market close (default 4:30 PM) with market turbulence, FII positioning, your watchlist
+ranked by momentum with delivery % and F&O build-up, signal changes, optional AI quick takes, and the track record.
+You get a Mac notification. **Create a report now** runs it immediately.
+
+## How accurate is this? (tested, not assumed)
+
+| Measure | Test | Result |
+|---|---|---|
+| Rule-based signals (trend, RSI, MACD, bands, volume) | 25 large stocks, 5 years, next 20 trading days | Bullish right **52%**, Bearish right **48%**: close to a coin flip. Shown as chart description, not prediction. |
+| Adding FinRL's ADX / CCI indicators to the score | Same test | No meaningful improvement, so they're shown as information only |
+| **12-month momentum vs NIFTY** (skipping the last month) | 45 large stocks, 7 years, next 3 months | Top 20% beat NIFTY **54%** of the time (avg **+2.7%**); bottom 20%: 49%. The best measure we found; modest, and flattered slightly because these are today's large companies |
+| Signals strategy vs buy-and-hold | Reliance, HDFC Bank, NIFTY, 5 years | The signals strategy **underperformed** buy-and-hold. The turbulence filter helped on HDFC Bank but not the others |
+| Yahoo prices | Cross-checked against NSE's official closing prices | Matched for the stocks tested; the app warns you whenever they differ by more than 0.3% or Yahoo is out of date |
 
 ## The AI team
 
 ```
-Technical · Fundamentals · News & Macro · Sentiment analysts   (work in parallel)
+Technical · Fundamentals · News & Macro · Sentiment analysts
         ↓
 Bull researcher  vs  Bear researcher                            (1–3 debate rounds)
         ↓
@@ -101,67 +117,80 @@ Aggressive · Conservative · Neutral risk analysts               (1–3 debate 
 Portfolio Manager: approves, modifies or rejects → rating Buy / Overweight / Hold / Underweight / Sell
 ```
 
-- A full run is 11 AI calls with all analysts and 1 round (16 with 2 rounds). **Quick mode** is 1 call.
-- Your AI choice (provider, model, depth) is remembered between sessions.
-- Tell the app whether you own the stock, your shares, average price, capital and risk per trade, and the plan is
-  sized to fit.
+- The AI sees the NSE-verified price, delivery %, F&O positioning, momentum, market turbulence, your position and its
+  own past calls, and is told how reliable each measure has been.
+- A full run is 11 AI calls with all analysts and 1 round. **Quick mode** is 1 call.
+- If a model ignores the required answer format, the app makes one short extra call to convert its answer, so the
+  rating card always works, even with small local models.
 
-## About AI keys (important)
+## AI options
 
-Your **Claude.ai, Gemini and ChatGPT subscriptions don't work in apps**. Apps use a separate **API key**:
+Your **Claude.ai, Gemini and ChatGPT subscriptions don't work in apps**. Choose one of these in the sidebar:
 
-| Provider | Where to get a key | Cost |
+| Provider | Cost | Setup | Speed |
+|---|---|---|---|
+| **Ollama** (on your Mac) | Free, unlimited, private | Install from https://ollama.com and pull a model (e.g. `ollama pull gemma4`). No key | Quick ≈ 1–2 min, full team ≈ 5 min |
+| **Gemini** | Free tier | Key from https://aistudio.google.com/apikey | Fast |
+| **OpenRouter** | Free models (daily limits) | Free key from https://openrouter.ai/keys; the app lists only free models | Fast |
+| **Groq** | Free tier (per-minute limits) | Free key from https://console.groq.com/keys | Very fast |
+| Claude | Pay per use | Key from https://console.anthropic.com/settings/keys | Fast |
+| ChatGPT | Pay per use | Key from https://platform.openai.com/api-keys | Fast |
+
+Keys are saved to `.env` in this folder (owner-only) when **Remember on this computer** is ticked; **Remove saved key**
+deletes it.
+
+## Free data sources
+
+| Source | Used for | Key? |
 |---|---|---|
-| **Gemini** (easiest) | https://aistudio.google.com/apikey → *Create API key* | Free tier, no card |
-| Claude | https://console.anthropic.com/settings/keys | Pay per use (add credit first) |
-| ChatGPT | https://platform.openai.com/api-keys | Pay per use (add credit first) |
+| Yahoo Finance | Prices (daily and 1-minute), fundamentals, company news | No |
+| **NSE official archives** | Official closing prices (data check), delivery %, F&O open interest and build-up, put-call ratio, FII/DII/Pro/Client index-futures positioning, the F&O stock list | No |
+| Google News (India) | Company and market headlines, including past dates for backtests | No |
+| StockTwits, Reddit | Retail sentiment | No |
 
-Paste the key in the sidebar with **Remember on this computer** ticked (needed for scheduled reports). It is saved to
-`.env` in this folder, readable only by your Mac user. **Remove saved key** deletes it. On the free Gemini tier, a
-full team run may pause briefly at the per-minute limit; the app waits and retries.
+NSE files are downloaded once per session date and cached in `data/nse/`. NSE also serves weekend and holiday files that
+repeat the previous session; the app reads the real session date inside each file and skips duplicates.
 
 ## Your data
 
-Everything you enter or the app records stays in the `data/` folder on your Mac (owner-only):
-
-| File | What |
-|---|---|
-| `data/portfolio.json` | Watchlist, positions, capital, risk per trade |
-| `data/settings.json` | AI choice, judging horizon, report schedule |
-| `data/track_record.db` | Every saved call, its result and lessons |
-| `data/journal.db` | Your trading journal |
-| `data/fno_universe.json`, `data/fno_sectors.json` | Cached F&O stock list and sectors (refreshed weekly) |
-| `data/reports/` | Daily reports |
-| `data/logs/daily.log` | Log of scheduled runs |
-
+Everything stays in the `data/` folder on your Mac (owner-only): `portfolio.json` (watchlist, positions, capital),
+`settings.json`, `track_record.db`, `journal.db`, `reports/`, `logs/`, and caches (`nse/`, F&O list and sectors).
 `data/` and `.env` are excluded from git, so they never go to GitHub.
 
 ## Safety and privacy
 
-- Sent to the AI you choose: market data, headlines, public social posts, the position/capital you entered, and your
-  past calls. Nothing else about you.
-- The server listens only on `localhost`, so other devices on your Wi-Fi can't open it.
-- Streamlit's usage statistics are turned off.
-- Prices come from Yahoo Finance and can be delayed (intraday by a minute or two). Social posts are noisy. AI can be
-  wrong, and backtests don't guarantee the future. Strength, zones and levels are calculations, not recommendations.
-  Most F&O traders lose money: SEBI's studies found about 9 in 10 individual F&O traders made net losses.
-  Check before you act.
+- Sent to the AI you choose: market data, headlines, public social posts, the position/capital you entered and your
+  past calls. With Ollama nothing leaves your Mac.
+- The server listens only on `localhost`. Streamlit's usage statistics are turned off.
+- Prices can be delayed. AI can be wrong. Backtests don't guarantee the future. Strength, zones and levels are
+  calculations, not recommendations. SEBI's studies found about 9 in 10 individual F&O traders made net losses.
+
+## What was taken from FinRL (and what wasn't)
+
+FinRL (MIT licence) is a deep-reinforcement-learning research framework. Re-implemented here: the **turbulence index**
+and risk switch, **pyfolio-style statistics**, **portfolio-allocation baselines** (equal weight, minimum variance, mean
+variance) with out-of-sample testing, and its extra indicators (tested, kept as information). **Not included:** the
+DRL agents (PPO, A2C, SAC…). They need about 2 GB of extra software and hours of training per stock, and FinRL itself
+presents them as research, not a trading tool.
 
 ## Files
 
 | File | What it does |
 |---|---|
-| `app.py` | Starts the app and the page menu |
-| `views/` | The five pages |
+| `app.py` | Starts the app and the grouped page menu |
+| `views/` | The nine pages |
 | `ui.py` | Shared page pieces: AI settings, decision card, tables, caching |
 | `research.py` | Gathers everything the AI sees, live or as of a past date |
-| `ai.py` | The multi-agent AI team (Gemini, Claude, OpenAI) |
+| `ai.py` | The multi-agent AI team and all AI providers (Ollama, Gemini, OpenRouter, Groq, Claude, OpenAI) |
+| `nse.py` | NSE official files: closing prices, delivery %, F&O build-up, participant positioning |
+| `stats.py` | Backtest statistics, turbulence index, momentum |
+| `optimizer.py` | Portfolio allocation and the out-of-sample check |
 | `track.py` | Track record, judging and memory |
 | `backtest.py` | Rule-based backtest and past-date selection |
 | `scanner.py` | Watchlist scanner |
 | `daily_report.py` / `scheduler.py` | Daily report and its Mac schedule |
 | `market.py`, `macro.py`, `social.py` | Prices, fundamentals, news, macro and sentiment data |
 | `fno.py`, `intraday.py`, `zones.py` | F&O universe and market calendar, intraday strength boards, order blocks and liquidity |
-| `journal.py` | Trading journal storage and statistics |
+| `journal.py` | Trading journal |
 | `indicators.py`, `charts.py` | Indicators, signals and charts |
 | `portfolio.py`, `settings.py`, `storage.py` | Your saved data and preferences |

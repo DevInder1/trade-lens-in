@@ -3,6 +3,7 @@ import streamlit as st
 
 import charts
 import intraday
+import nse
 import portfolio
 import zones
 import ui
@@ -62,6 +63,10 @@ def popup(rows: list[dict], snap_key: str):
              ("Day high", ui.rupees(row["high"]), "Day low", ui.rupees(row["low"])),
              ("Normal daily range", ui.rupees(row["adr"]), "Volume vs usual",
               f"{row['rel_volume']:.1f}×" if row["rel_volume"] else "–")]
+    fo = nse.fo_for(row["ticker"])
+    if fo:
+        pairs.append((f"F&O ({fo['date']})", f"{fo['buildup']}, OI {fo['oi_change_pct']:+.1f}%", "Put-call ratio",
+                      f"{fo['pcr']:.2f}" if fo["pcr"] is not None else "–"))
     st.markdown("  \n".join(f"**{l1}:** {v1} · **{l2}:** {v2}" for l1, v1, l2, v2 in pairs))
     st.plotly_chart(charts.zone_chart(a, f"{row['symbol']} · 5-minute"), width="stretch", key=f"chart_{snap_key}_{pos}")
     s = a["setup"]
@@ -170,6 +175,27 @@ def terminal():
     st.caption("Δ = places moved since the previous refresh (🆕 = new in the top 10). Strength = move from the open "
                "in multiples of the stock's normal daily range. Clean % = share of the day's range on the side of "
                "the move.")
+
+    fo_day, fo_table = ui.get_fo_table()
+    if not fo_table.empty:
+        with st.expander(f"🧾 F&O positioning · end of day {fo_day:%d %b} (NSE official)", expanded=False):
+            stocks_only = fo_table[~fo_table.index.isin(["NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50"])]
+            counts = stocks_only["buildup"].value_counts()
+            st.markdown(" · ".join(f"**{k}:** {counts.get(k, 0)}" for k in
+                                   ("Long build-up", "Short covering", "Short build-up", "Long unwinding")))
+            index_rows = fo_table[fo_table.index.isin(["NIFTY", "BANKNIFTY"])]
+            for name, r in index_rows.iterrows():
+                st.caption(f"{name}: {r['buildup']} (OI {r['oi_change_pct']:+.1f}%, put-call ratio {r['pcr']:.2f})")
+            view = stocks_only.assign(**{"Price %": stocks_only["price_change_pct"].round(2),
+                                         "OI change %": stocks_only["oi_change_pct"].round(2),
+                                         "PCR": stocks_only["pcr"].round(2)})
+            c1, c2 = st.columns(2)
+            for col, label in ((c1, "Long build-up"), (c2, "Short build-up")):
+                top = view[view["buildup"] == label].sort_values("OI change %", ascending=False).head(10)
+                col.markdown(f"**Biggest {label.lower()}**")
+                col.dataframe(top[["Price %", "OI change %", "PCR"]], width="stretch")
+            st.caption("Build-up compares the futures price change with the change in open interest: rising OI shows "
+                       "new positions, falling OI shows positions closing.")
 
     with st.expander("🧭 Sector flow", expanded=False):
         st.dataframe(flow.rename(columns={"sector": "Sector", "stocks": "Stocks", "avg_strength": "Avg strength",

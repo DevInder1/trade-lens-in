@@ -81,12 +81,14 @@ except Exception as exc:
     st.caption("Tip: use the NSE code (e.g. HDFCBANK, not HDFC Bank). Switch to BSE if the stock is only listed there.")
     st.stop()
 
-with st.spinner("Loading fundamentals, news, sentiment and market data…"):
+with st.spinner("Loading fundamentals, news, sentiment, official NSE data and market data…"):
     fundamentals = {} if market.is_index(symbol) else ui.get_fundamentals(symbol)
     name = fundamentals.get("Company") or query.strip().upper()
+    extras = ui.get_extras(symbol, float(df["Close"].iloc[-1]), df.index[-1].strftime("%Y-%m-%d"))
+    turbulence_series, turbulence = ui.get_turbulence()
     data = research.build(symbol, df=df, name=name, fundamentals=fundamentals, news=ui.get_news(symbol, name),
                           market_news=ui.get_market_news(), macro_rows=ui.get_macro(),
-                          chatter=ui.get_social(symbol, name), book=book)
+                          chatter=ui.get_social(symbol, name), book=book, turbulence=turbulence, extras=extras)
 
 snap, sigs = data["snapshot"], data["signals"]
 tech_view, tech_score = data["view"], data["score"]
@@ -95,8 +97,13 @@ holding = portfolio.holding_for(book, symbol, snap["Close"])
 size = portfolio.sizing(capital, risk_pct, snap["Close"], snap["ATR"])
 
 st.title(name)
-st.caption(f"{symbol} · last close {snap['date']} · data from Yahoo Finance (may be delayed)"
+st.caption(f"{symbol} · last close {snap['date']} · prices from Yahoo Finance"
            + (" · ⭐ on your watchlist" if symbol in book["watchlist"] else ""))
+check = extras.get("verify")
+if check and check["status"] == "ok":
+    st.caption(f"✅ Verified: {check['text']}")
+elif check and check["status"] == "warn":
+    st.warning(f"⚠️ Data check: {check['text']}")
 
 cols = st.columns(3)
 cols[0].metric("Last close", ui.rupees(snap["Close"]), ui.pct(snap["change_1d"]))
@@ -122,9 +129,44 @@ with tab_chart:
                "RSI above 70 = overbought, below 30 = oversold.")
 
 with tab_signals:
-    st.subheader(f"{ui.BADGE[tech_view]} Overall: {tech_view} (score {tech_score:+d})")
-    st.caption("Simple rule-based checks. Each bullish signal adds 1, each bearish subtracts 1. No AI used. "
-               "See how reliable they have been for this stock on the Backtest page.")
+    st.subheader("📐 Evidence-based measures")
+    st.caption("These come from official NSE files or have held up in our tests on Indian large caps.")
+    momentum = extras.get("momentum")
+    if momentum is not None:
+        leaders = ui.get_momentum_leaders()
+        mine = leaders[leaders["Symbol"] == symbol.removesuffix(".NS")]
+        rank = f" · ranks {mine.index[0] + 1} of {len(leaders)} F&O stocks" if not mine.empty else ""
+        verdict = "🟢" if momentum > 0 else "🔴"
+        st.markdown(f"{verdict} **12-month momentum vs NIFTY** (skipping the last month): **{momentum:+.1f} pts**{rank}  \n"
+                    "Most reliable measure in our tests: the top 20% beat NIFTY over the next 3 months 54% of the "
+                    "time (bottom 20%: 49%). A modest edge, not a guarantee.")
+    delivery = extras.get("delivery")
+    if delivery:
+        st.markdown(f"{ui.BADGE[delivery['verdict']]} **Delivery % (NSE official, {delivery['date']}):** "
+                    f"{delivery['delivery_pct']:.1f}% vs {delivery['avg_pct']:.1f}% usual  \n{delivery['detail']}")
+        history = ui.get_delivery_history(symbol)
+        if not history.empty:
+            st.bar_chart(history["delivery_pct"].rename("Delivery %"), height=160)
+    fo = extras.get("fo")
+    if fo:
+        mood = {"Long build-up": "🟢", "Short covering": "🟢", "Short build-up": "🔴", "Long unwinding": "🔴"}[fo["buildup"]]
+        pcr = f" · put-call ratio {fo['pcr']:.2f}" if fo["pcr"] is not None else ""
+        st.markdown(f"{mood} **F&O positioning (NSE official, {fo['date']}): {fo['buildup']}**  \n"
+                    f"Futures price {fo['price_change_pct']:+.2f}%, open interest {fo['oi_change_pct']:+.2f}%{pcr}. "
+                    f"{fo['detail']}")
+    row = df.iloc[-1]
+    if not pd.isna(row.get("ADX")):
+        strength = "strong trend" if row["ADX"] >= 25 else "weak or no trend" if row["ADX"] < 20 else "building trend"
+        direction = "up" if row["DI_plus"] > row["DI_minus"] else "down"
+        st.markdown(f"⚪ **Trend strength (ADX):** {row['ADX']:.0f}, {strength}, pointing {direction} · "
+                    f"**CCI:** {row['CCI']:.0f}  \nInformation only: adding these to the score didn't improve "
+                    "accuracy in our tests.")
+
+    st.divider()
+    st.subheader(f"{ui.BADGE[tech_view]} Rule checks: {tech_view} (score {tech_score:+d})")
+    st.caption("Simple rule-based checks (trend, momentum, bands, volume). Honest note: across 25 large stocks over "
+               "5 years, Bullish readings were right 52% of the time and Bearish 48% — close to a coin flip. Use them "
+               "to describe the chart, not to predict it. Check this stock on the Backtest page.")
     for s in sigs:
         st.markdown(f"{ui.BADGE[s['verdict']]} **{s['name']}** — {s['verdict']}  \n{s['detail']}")
     st.divider()
@@ -184,6 +226,19 @@ with tab_social:
 with tab_market:
     if vix:
         st.subheader(f"🌡️ {vix}")
+    if turbulence:
+        st.markdown(f"**Market turbulence: {turbulence['label']}** — {turbulence['note']} (5-day average at the "
+                    f"{turbulence['five_day_percentile']:.0f}th percentile of the last 2 years, from 50 large stocks).")
+        st.line_chart(turbulence_series.tail(500).rename("Turbulence index"), height=160)
+        st.caption("Turbulence measures how unusual the market's moves are compared with the past year "
+                   "(the FinRL framework's risk switch). Spikes match events like the June 2024 election result day.")
+    flows = ui.get_participants()
+    if flows:
+        st.markdown(f"**Who is positioned how in index futures** (NSE official, {flows['date']:%d %b %Y})")
+        st.dataframe([{**r, "Long %": f"{r['Long %']:.0f}%" if r.get("Long %") is not None else "–"}
+                      for r in flows["rows"]], width="stretch", hide_index=True)
+        st.caption("FII = foreign investors. A low FII long % means foreigners are betting on a fall in the index; "
+                   "retail clients are often on the other side.")
     if data["macro_rows"]:
         st.dataframe([{
             "Indicator": r["name"], "Last": f"{r['last']:,.2f}", "1 week": ui.pct(r["change_1w"]),
@@ -251,8 +306,8 @@ with tab_ai:
                 research.record_ai(data, result, cfg["provider"], cfg["model"], prefs["horizon_days"],
                                    "ai-quick" if cfg["quick"] else "ai")
                 st.session_state[state_key] = result
-        if not cfg["api_key"]:
-            st.warning("Paste an API key in the sidebar to run the AI team.")
+        if not cfg["ready"]:
+            st.warning("Finish the AI setup in the sidebar (model and, for cloud AI, an API key).")
 
         result = st.session_state.get(state_key)
         if result:

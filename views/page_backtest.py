@@ -20,6 +20,9 @@ with st.sidebar:
     horizon = st.selectbox("Judge each call after (trading days)", [10, 20, 40, 60],
                            index=[10, 20, 40, 60].index(prefs["horizon_days"]) if prefs["horizon_days"] in
                            (10, 20, 40, 60) else 1)
+    use_turbulence = st.toggle("Also test a turbulence filter", value=True,
+                               help="FinRL's risk switch: stay in cash on days when market turbulence is in the top "
+                                    "10% of the past year.")
 cfg = ui.ai_sidebar(title="AI backtest (optional)")
 st.sidebar.divider()
 st.sidebar.caption(ui.DISCLAIMER)
@@ -36,7 +39,7 @@ st.caption(f"For every trading day in the last {years} year(s), the app works ou
            "Bullish and holds cash otherwise, with 0.1% cost per trade.")
 try:
     with st.spinner("Running backtest…"):
-        bt = ui.get_backtest(symbol, years, horizon)
+        bt = ui.get_backtest(symbol, years, horizon, use_turbulence)
 except Exception as exc:
     st.error(f"Backtest failed: {exc}")
     st.stop()
@@ -49,6 +52,12 @@ c2.metric("Buy and hold", ui.pct(s["hold_return"]), f"worst fall {s['hold_drawdo
 c3.metric("NIFTY 50", ui.pct(s["nifty_return"]))
 c4.metric("Time invested", f"{s['time_in_market']:.0f}%", f"{s['entries']} entries", delta_color="off")
 st.plotly_chart(charts.equity_chart(bt["curves"]), width="stretch")
+with st.expander("📊 Full statistics (as used by FinRL/pyfolio)", expanded=True):
+    st.dataframe(bt["stats"], width="stretch")
+    st.caption("Sharpe and Sortino use a 6.5% risk-free rate (about an Indian T-bill). Sharpe above 1 is good; below "
+               "0 means a fixed deposit would have done better. Max drawdown = the worst fall from a peak."
+               + (f" The turbulence filter kept the strategy in cash on {s['risk_off_days']:.0f}% of days."
+                  if s.get("risk_off_days") is not None else ""))
 st.markdown(f"**How reliable each signal view was** ({s['start']} to {s['end']}):")
 st.dataframe(bt["table"], width="stretch", hide_index=True)
 st.caption("Past results don't guarantee future results. A hit rate near 50% means the signal adds little on this stock.")

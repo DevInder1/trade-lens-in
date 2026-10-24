@@ -2,12 +2,13 @@ import pandas as pd
 
 import indicators
 import market
+import stats
 import track
 
 COST_PCT = 0.1
 
 
-def signal_backtest(symbol: str, years: int, horizon: int) -> dict:
+def signal_backtest(symbol: str, years: int, horizon: int, turbulence_filter: bool = False) -> dict:
     end = pd.Timestamp.today().normalize()
     start = end - pd.DateOffset(years=years) - pd.Timedelta(days=420)
     df = indicators.add_indicators(market.load_history(symbol, start, end))
@@ -38,15 +39,23 @@ def signal_backtest(symbol: str, years: int, horizon: int) -> dict:
             "Hit rate": f"{outcomes.count('Right') / len(outcomes) * 100:.0f}%",
         })
 
-    position = (views["view"] == "Bullish").astype(float)
     daily = close.pct_change().fillna(0)
-    trades = position.diff().abs().fillna(position.iloc[0])
-    strategy = position.shift(1).fillna(0) * daily - trades * COST_PCT / 100
-    curves = pd.DataFrame({
-        "Signals strategy": (1 + strategy).cumprod(),
-        "Buy and hold": close / close.iloc[0],
-        "NIFTY 50": bench / bench.iloc[0],
-    }) * 100
+
+    def run(position):
+        trades = position.diff().abs().fillna(position.iloc[0])
+        return (1 + position.shift(1).fillna(0) * daily - trades * COST_PCT / 100).cumprod()
+
+    position = (views["view"] == "Bullish").astype(float)
+    curves = {"Signals strategy": run(position)}
+    risk_off_days = None
+    if turbulence_filter:
+        turb = stats.turbulence(stats.basket_closes(start, end))
+        risk_off = stats.risk_off_mask(turb).reindex(df.index).fillna(False).astype(bool)
+        risk_off_days = float(risk_off.mean() * 100)
+        curves["Signals + turbulence filter"] = run(position.where(~risk_off, 0.0))
+    curves["Buy and hold"] = close / close.iloc[0]
+    curves["NIFTY 50"] = bench / bench.iloc[0]
+    curves = pd.DataFrame(curves) * 100
 
     def drawdown(series):
         return float((series / series.cummax() - 1).min() * 100)
@@ -61,8 +70,9 @@ def signal_backtest(symbol: str, years: int, horizon: int) -> dict:
         "hold_drawdown": drawdown(curves["Buy and hold"]),
         "time_in_market": float(position.mean() * 100),
         "entries": int((position.diff() > 0).sum() + (position.iloc[0] > 0)),
+        "risk_off_days": risk_off_days,
     }
-    return {"table": table, "curves": curves, "summary": summary, "views": views}
+    return {"table": table, "curves": curves, "summary": summary, "views": views, "stats": stats.stats_table(curves)}
 
 
 def past_dates(symbol: str, count: int, horizon: int, spacing: int = 21) -> list[str]:

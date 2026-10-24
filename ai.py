@@ -1,14 +1,39 @@
 import json
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from urllib.request import Request, urlopen
+
+OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 PROVIDERS = {
+    "Ollama (free, runs on this Mac)": {
+        "env": None,
+        "models": [],
+        "base_url": OLLAMA_URL.rstrip("/") + "/v1",
+        "key_url": "https://ollama.com/download",
+        "note": "Free, private and unlimited. Nothing leaves your Mac. Slower than cloud AI.",
+    },
     "Gemini (Google)": {
         "env": "GEMINI_API_KEY",
         "models": ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"],
         "key_url": "https://aistudio.google.com/apikey",
         "note": "Free tier available. No card needed.",
+    },
+    "OpenRouter (free models)": {
+        "env": "OPENROUTER_API_KEY",
+        "models": [],
+        "base_url": "https://openrouter.ai/api/v1",
+        "key_url": "https://openrouter.ai/keys",
+        "note": "Free key. The list shows only free models (limited requests per day).",
+    },
+    "Groq (free tier)": {
+        "env": "GROQ_API_KEY",
+        "models": [],
+        "base_url": "https://api.groq.com/openai/v1",
+        "key_url": "https://console.groq.com/keys",
+        "note": "Free key, very fast. Free tier has per-minute limits.",
     },
     "Claude (Anthropic)": {
         "env": "ANTHROPIC_API_KEY",
@@ -53,6 +78,8 @@ def _friendly(provider: str, exc: Exception) -> str:
         return f"{provider} says you hit a usage or quota limit. Wait a minute, use Quick mode, or check your plan."
     if status == 404 or "NotFound" in name:
         return f"{provider} does not recognise that model name. Pick another model."
+    if ("Connection" in name or "Timeout" in name) and provider.startswith("Ollama"):
+        return "Ollama isn't answering. Open the Ollama app on your Mac and try again."
     if "Connection" in name or "Timeout" in name:
         return f"Could not reach {provider}. Check your internet connection."
     message = getattr(exc, "message", None) or str(exc)
@@ -99,16 +126,70 @@ def _ask_openai(model, api_key, prompt):
     return response.output_text or ""
 
 
+def _compatible(provider):
+    local = provider.startswith("Ollama")
+
+    def asker(model, api_key, prompt, deep=False):
+        from openai import OpenAI
+
+        client = OpenAI(api_key=api_key or "local", base_url=PROVIDERS[provider]["base_url"], max_retries=2,
+                        timeout=900 if local else 300)
+        options = {} if deep or not local else {"reasoning_effort": "none"}
+        messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}]
+        for _ in range(2):
+            response = client.chat.completions.create(model=model, messages=messages, **options)
+            text = response.choices[0].message.content if response.choices else ""
+            text = re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL)
+            if text.strip():
+                return text
+            options = {"reasoning_effort": "none"} if local else options
+        return ""
+    return asker
+
+
+COMPATIBLE = {name for name, spec in PROVIDERS.items() if "base_url" in spec}
 ASKERS = {
     "Claude (Anthropic)": _ask_claude,
     "Gemini (Google)": _ask_gemini,
     "ChatGPT (OpenAI)": _ask_openai,
+    **{name: _compatible(name) for name in COMPATIBLE},
 }
 
 
-def ask(provider: str, model: str, api_key: str, prompt: str) -> str:
+def _get_json(url: str, key: str | None = None, timeout: float = 5):
+    headers = {"User-Agent": "trade-lens-in"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    with urlopen(Request(url, headers=headers), timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def live_models(provider: str, api_key: str | None = None) -> list[str]:
     try:
-        text = ASKERS[provider](model, api_key, prompt)
+        if provider.startswith("Ollama"):
+            return [m["name"] for m in _get_json(OLLAMA_URL.rstrip("/") + "/api/tags", timeout=3).get("models", [])]
+        if provider.startswith("OpenRouter"):
+            data = _get_json("https://openrouter.ai/api/v1/models").get("data", [])
+            return sorted(m["id"] for m in data
+                          if str(m.get("pricing", {}).get("prompt")) in ("0", "0.0")
+                          and str(m.get("pricing", {}).get("completion")) in ("0", "0.0"))
+        if provider.startswith("Groq") and api_key:
+            data = _get_json("https://api.groq.com/openai/v1/models", api_key).get("data", [])
+            return sorted(m["id"] for m in data if m.get("active", True) and "whisper" not in m["id"]
+                          and "tts" not in m["id"] and "guard" not in m["id"])
+    except Exception:
+        return []
+    return PROVIDERS.get(provider, {}).get("models", [])
+
+
+def needs_key(provider: str) -> bool:
+    return bool(PROVIDERS.get(provider, {}).get("env"))
+
+
+def ask(provider: str, model: str, api_key: str, prompt: str, deep: bool = False) -> str:
+    asker = ASKERS[provider]
+    try:
+        text = asker(model, api_key, prompt, deep=True) if deep and provider in COMPATIBLE else asker(model, api_key, prompt)
     except AIError:
         raise
     except Exception as exc:
@@ -119,7 +200,8 @@ def ask(provider: str, model: str, api_key: str, prompt: str) -> str:
 
 
 def _parallel(provider, model, api_key, prompts: dict) -> dict:
-    with ThreadPoolExecutor(max_workers=min(4, len(prompts))) as pool:
+    workers = 1 if not needs_key(provider) else min(4, len(prompts))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {name: pool.submit(ask, provider, model, api_key, prompt) for name, prompt in prompts.items()}
         return {name: future.result() for name, future in futures.items()}
 
@@ -137,9 +219,32 @@ def _technical_data(data: dict) -> str:
         f"Instrument: {data['name']} ({data['symbol']})\n"
         f"Latest snapshot:\n{_dump(data['snapshot'])}\n\n"
         f"Performance vs NIFTY 50 (percentage points): {_dump(data['relative'])}\n\n"
-        f"Rule-based signals:\n{_dump(data['signals'])}\n\n"
+        f"Rule-based signals (historically close to a coin flip, so give them little weight):\n"
+        f"{_dump(data['signals'])}\n\n{_evidence(data)}"
         f"Last 30 trading days:\n{data['recent'].round(2).to_csv()}"
     )
+
+
+def _evidence(data: dict) -> str:
+    extras = data.get("extras") or {}
+    lines = []
+    if extras.get("momentum") is not None:
+        lines.append(f"12-month momentum (skipping the last month) vs NIFTY: {extras['momentum']:+.1f} percentage "
+                     "points. In our tests on large Indian stocks, the strongest 20% by this measure beat NIFTY over "
+                     "the next 3 months 54% of the time; it is the most reliable signal we have, but still modest.")
+    if extras.get("delivery"):
+        d = extras["delivery"]
+        lines.append(f"NSE delivery % on {d['date']}: {d['delivery_pct']:.1f}% vs {d['avg_pct']:.1f}% average of the "
+                     f"previous sessions ({d['verdict']}: {d['detail']})")
+    if extras.get("fo"):
+        f = extras["fo"]
+        pcr = f", put-call ratio {f['pcr']:.2f}" if f["pcr"] is not None else ""
+        lines.append(f"NSE F&O on {f['date']}: {f['buildup']} (futures price {f['price_change_pct']:+.2f}%, open "
+                     f"interest {f['oi_change_pct']:+.2f}%{pcr}). {f['detail']}")
+    if extras.get("verify"):
+        lines.append(f"Data check: {extras['verify']['text']}")
+    return ("Official NSE data and evidence-based measures:\n" + "\n".join(f"- {line}" for line in lines) + "\n\n"
+            if lines else "")
 
 
 def _fundamental_data(data: dict) -> str:
@@ -184,14 +289,15 @@ def _sentiment_data(data: dict) -> str:
     rd = social["reddit"]
     parts = []
     if st["available"] and st["messages"]:
-        lines = "\n".join(f"- [{m['date']}] ({m['sentiment'] or 'unlabelled'}, {m['likes']} likes) {m['body']}"
-                          for m in st["messages"])
+        lines = "\n".join(f"- [{m['date']}] ({m['sentiment'] or 'unlabelled'}, {m['likes']} likes) {m['body'][:200]}"
+                          for m in st["messages"][:15])
         parts.append(f"StockTwits: {len(st['messages'])} recent messages, {st['bullish']} labelled Bullish, "
                      f"{st['bearish']} labelled Bearish.\n{lines}")
     else:
         parts.append("StockTwits: no messages available.")
     if rd["posts"]:
-        lines = "\n".join(f"- [{p['date']}] r/{p['subreddit']}: {p['title']} — {p['text'][:300]}" for p in rd["posts"])
+        lines = "\n".join(f"- [{p['date']}] r/{p['subreddit']}: {p['title']} — {p['text'][:160]}"
+                          for p in rd["posts"][:12])
         parts.append(f"Reddit (Indian investing communities, last 30 days): {len(rd['posts'])} posts.\n{lines}")
     elif rd.get("error"):
         parts.append(f"Reddit: no posts available ({rd['error']}).")
@@ -208,6 +314,11 @@ def _risk_facts(data: dict) -> str:
         f"Average daily traded value (20 days): ₹{data['liquidity']:,.0f}" if data.get("liquidity") else "",
         data["vix"] or "",
     ]
+    t = data.get("turbulence")
+    if t:
+        facts.append(f"Market turbulence index (how unusual recent market moves are vs the past year): {t['label']} "
+                     f"(5-day average at the {t['five_day_percentile']:.0f}th percentile of the last 2 years) — "
+                     f"{t['note']}")
     return "\n".join(f for f in facts if f)
 
 
@@ -330,16 +441,19 @@ def run_team(provider: str, model: str, api_key: str, data: dict, analysts: list
     head = _header(data)
     memory = _memory(data)
 
+    focus = _focus(data)
     if quick:
         notify("Portfolio Manager is reviewing all the data")
         prompt = (
-            f"{head}Act as the Portfolio Manager doing a quick review on your own. Weigh the technical data, "
-            "fundamentals, news, macro and social sentiment below, and the user's position.\n\nUSER'S POSITION:\n"
-            f"{position}{memory}\n\n{DECISION_FORMAT}\n\n=== TECHNICAL DATA ===\n{_technical_data(data)}\n\n"
-            f"=== FUNDAMENTALS ===\n{_fundamental_data(data)}\n\n=== NEWS & MACRO ===\n{_news_data(data)}\n\n"
-            f"=== SOCIAL SENTIMENT ===\n{_sentiment_data(data)}\n\n=== RISK FACTS ===\n{_risk_facts(data)}"
+            f"{head}Act as the Portfolio Manager doing a quick review on your own. {focus} Weigh the technical "
+            "data, fundamentals, news, macro and social sentiment below, and the user's position.\n\n"
+            f"=== TECHNICAL DATA ===\n{_technical_data(data)}\n\n=== FUNDAMENTALS ===\n{_fundamental_data(data)}\n\n"
+            f"=== NEWS & MACRO ===\n{_news_data(data)}\n\n=== SOCIAL SENTIMENT ===\n{_sentiment_data(data)}\n\n"
+            f"=== RISK FACTS ===\n{_risk_facts(data)}\n\n=== USER'S POSITION ===\n{position}{memory}\n\n"
+            f"=== YOUR TASK ===\n{focus}\n{DECISION_FORMAT}"
         )
-        return {"final": ask(provider, model, api_key, prompt), "calls": 1}
+        final, extra = ensure_decision(provider, model, api_key, ask(provider, model, api_key, prompt, deep=True), data)
+        return {"final": final, "calls": 1 + extra}
 
     chosen = team_analysts(analysts, bool(data.get("as_of")))
     notify(f"{', '.join(chosen)} analyst{'s are' if len(chosen) > 1 else ' is'} working")
@@ -352,9 +466,9 @@ def run_team(provider: str, model: str, api_key: str, data: dict, analysts: list
     notify("Trader is drafting the trading plan")
     trader = ask(provider, model, api_key, (
         f"{head}You are the Trader. Read the analyst reports and the bull vs bear debate, decide who argued better, "
-        f"and turn it into a concrete trading plan for this user.\n\nUSER'S POSITION:\n{position}{memory}\n\n"
-        f"RISK FACTS:\n{_risk_facts(data)}\n\n{TRADER_FORMAT}\n\n{analyst_notes}\n\n=== BULL VS BEAR DEBATE ===\n"
-        f"{_transcript(research)}"
+        f"and turn it into a concrete trading plan for this user. {focus}\n\n{analyst_notes}\n\n"
+        f"=== BULL VS BEAR DEBATE ===\n{_transcript(research)}\n\n=== RISK FACTS ===\n{_risk_facts(data)}\n\n"
+        f"=== USER'S POSITION ===\n{position}{memory}\n\n=== YOUR TASK ===\n{focus}\n{TRADER_FORMAT}"
     ))
 
     risk_context = (f"{head}USER'S POSITION:\n{position}\n\nRISK FACTS:\n{_risk_facts(data)}\n\n"
@@ -365,10 +479,11 @@ def run_team(provider: str, model: str, api_key: str, data: dict, analysts: list
     final = ask(provider, model, api_key, (
         f"{head}You are the Portfolio Manager and you make the final decision. Review the trader's plan and the risk "
         "team's debate, then approve, modify or reject the plan. Protect the user's capital first, and fit the "
-        f"decision to their position.\n\nUSER'S POSITION:\n{position}{memory}\n\nRISK FACTS:\n{_risk_facts(data)}"
-        f"\n\n{DECISION_FORMAT}\n\n=== TRADER'S PLAN ===\n{trader}\n\n=== RISK TEAM DEBATE ===\n"
-        f"{_transcript(risk)}\n\n{analyst_notes}"
-    ))
+        f"decision to their position. {focus}\n\n{analyst_notes}\n\n=== TRADER'S PLAN ===\n{trader}\n\n"
+        f"=== RISK TEAM DEBATE ===\n{_transcript(risk)}\n\n=== RISK FACTS ===\n{_risk_facts(data)}\n\n"
+        f"=== USER'S POSITION ===\n{position}{memory}\n\n=== YOUR TASK ===\n{focus}\n{DECISION_FORMAT}"
+    ), deep=True)
+    final, extra = ensure_decision(provider, model, api_key, final, data)
 
     return {
         "analysts": reports,
@@ -376,8 +491,28 @@ def run_team(provider: str, model: str, api_key: str, data: dict, analysts: list
         "trader": trader,
         "risk_debate": risk,
         "final": final,
-        "calls": call_count(chosen, rounds, False),
+        "calls": call_count(chosen, rounds, False) + extra,
     }
+
+
+def _focus(data: dict) -> str:
+    return (f"Decide only about {data['name']} ({data['symbol']}) shares themselves, not about any other company, "
+            "IPO or subsidiary mentioned in the news.")
+
+
+def ensure_decision(provider: str, model: str, api_key: str, text: str, data: dict) -> tuple[str, int]:
+    if parse_decision(text)["rating"]:
+        return text, 0
+    fixed = ask(provider, model, api_key, (
+        f"Below is our team's analysis of {data['name']} ({data['symbol']}). Turn its conclusion into the exact "
+        f"format requested at the end. Do not add new analysis.\n\n=== ANALYSIS ===\n{text[:6000]}\n\n"
+        f"=== YOUR TASK ===\n{_focus(data)}\n{DECISION_FORMAT}"
+    ))
+    parsed = parse_decision(fixed)
+    if not parsed["rating"]:
+        return text, 1
+    header = "\n".join(f"{key}: {parsed[key.lower()]}" for key in DECISION_KEYS[:8] if parsed[key.lower()])
+    return f"{header}\n\n{text}", 1
 
 
 def asker(provider: str, model: str, api_key: str):

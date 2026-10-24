@@ -2,7 +2,9 @@ import json
 import os
 from datetime import datetime
 
+import pandas as pd
 import streamlit as st
+import yfinance as yf
 from dotenv import set_key, unset_key
 
 import ai
@@ -12,10 +14,13 @@ import indicators
 import intraday
 import macro
 import market
+import nse
 import portfolio
+import research
 import scanner
 import settings
 import social
+import stats
 import track
 from storage import ENV_PATH
 
@@ -31,6 +36,61 @@ DISCLAIMER = ("For education and research only. Not financial advice. "
 @st.cache_data(ttl=900, show_spinner=False)
 def get_prices(symbol, period):
     return indicators.add_indicators(market.load_prices(symbol, period))
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def get_turbulence():
+    series = stats.turbulence(stats.basket_closes(pd.Timestamp.today() - pd.DateOffset(years=4)))
+    return series, stats.turbulence_level(series)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_extras(symbol, close, day):
+    snap = {"Close": close, "date": day}
+    return research.live_extras(symbol, snap, get_prices(symbol, "2y"))
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_delivery_history(symbol):
+    found = nse.delivery_summary(symbol)
+    return found["history"] if found else pd.DataFrame()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_participants():
+    return nse.participants()
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_fo_table():
+    return nse.fo_positioning()
+
+
+@st.cache_data(ttl=6 * 3600, show_spinner=False)
+def get_momentum_leaders():
+    stocks = fno.universe()
+    tickers = [fno.ticker(s["symbol"]) for s in stocks]
+    raw = yf.download([*tickers, track.BENCHMARK], period="14mo", interval="1d", group_by="ticker", threads=True,
+                      progress=False, auto_adjust=True)
+    bench = raw[track.BENCHMARK]["Close"].dropna()
+    names = {fno.ticker(s["symbol"]): s["name"] for s in stocks}
+    sectors = fno.sectors([s["symbol"] for s in stocks])
+    rows = []
+    for t in tickers:
+        if t not in raw.columns.get_level_values(0):
+            continue
+        value = stats.momentum_12_1(raw[t]["Close"], bench)
+        if value is not None:
+            rows.append({"Symbol": t.removesuffix(".NS"), "Company": names[t], "Sector": sectors[t.removesuffix(".NS")],
+                         "Momentum vs NIFTY": value})
+    table = pd.DataFrame(rows).sort_values("Momentum vs NIFTY", ascending=False).reset_index(drop=True)
+    table["Rank %"] = (1 - table.index / max(len(table) - 1, 1)) * 100
+    return table
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_live_models(provider, key):
+    return ai.live_models(provider, key)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -69,8 +129,8 @@ def refresh_track(_stamp: str):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_backtest(symbol, years, horizon):
-    return backtest.signal_backtest(symbol, years, horizon)
+def get_backtest(symbol, years, horizon, turbulence_filter=False):
+    return backtest.signal_backtest(symbol, years, horizon, turbulence_filter)
 
 
 @st.cache_resource(ttl=6 * 3600, show_spinner=False)
@@ -146,9 +206,15 @@ def ai_sidebar(team_options: bool = True, title: str = "AI team (optional)") -> 
         return cfg
 
     spec = ai.PROVIDERS[provider]
-    options = [*spec["models"], "Other (type a name)"]
+    key = os.environ.get(spec["env"], "") if spec["env"] else ""
+    available = get_live_models(provider, key or None) or spec["models"]
+    local = not ai.needs_key(provider)
+    if local and not available:
+        st.sidebar.warning("Ollama isn't running on this Mac. Open the Ollama app (or install it from "
+                           "[ollama.com](https://ollama.com/download)), then reload this page.")
+    options = [*available, "Other (type a name)"]
     saved_model = prefs["model"] if prefs["provider"] == provider else ""
-    custom = bool(saved_model) and saved_model not in spec["models"]
+    custom = bool(saved_model) and saved_model not in available
     choice = st.sidebar.selectbox("Model", options,
                                   index=len(options) - 1 if custom else
                                   (options.index(saved_model) if saved_model in options else 0),
@@ -156,14 +222,15 @@ def ai_sidebar(team_options: bool = True, title: str = "AI team (optional)") -> 
     model = (st.sidebar.text_input("Model name", value=saved_model if custom else "", key=f"ai_custom::{provider}")
              if choice.startswith("Other") else choice)
 
-    key = os.environ.get(spec["env"], "")
-    if key:
+    if local:
+        st.sidebar.caption(f"🔒 {spec['note']} A Quick run takes about 1–2 minutes; the full team about 5.")
+    elif key:
         st.sidebar.success("API key saved on this computer ✓")
         if st.sidebar.button("Remove saved key", key=f"forget::{provider}"):
             forget_key(spec["env"])
             st.rerun()
     else:
-        st.sidebar.markdown(f"[Get a {provider.split(' ')[0]} API key]({spec['key_url']}) · {spec['note']}")
+        st.sidebar.markdown(f"[Get a {provider.split(' (')[0]} API key]({spec['key_url']}) · {spec['note']}")
         entered = st.sidebar.text_input("Paste API key", type="password", key=f"ai_key::{provider}")
         remember = st.sidebar.checkbox("Remember on this computer", value=True, key=f"ai_remember::{provider}",
                                        help="Saved to .env in the app folder, readable only by your Mac user.")
@@ -171,6 +238,7 @@ def ai_sidebar(team_options: bool = True, title: str = "AI team (optional)") -> 
             key = entered.strip()
             if remember:
                 save_key(spec["env"], key)
+                get_live_models.clear()
 
     quick, analysts, rounds = prefs["quick"], prefs["analysts"], prefs["rounds"]
     if team_options:
@@ -186,7 +254,7 @@ def ai_sidebar(team_options: bool = True, title: str = "AI team (optional)") -> 
         st.sidebar.caption(f"One run makes about **{ai.call_count(analysts, rounds, quick)} AI calls**.")
     settings.update(provider=provider, model=model or "", quick=quick, analysts=analysts, rounds=rounds)
     cfg.update(model=model, api_key=key or None, quick=quick if team_options else True, analysts=analysts,
-               rounds=rounds, ready=bool(key and model))
+               rounds=rounds, ready=bool(model and (key or (local and available))))
     return cfg
 
 

@@ -62,13 +62,22 @@ for r in good:
         "1 day": ui.pct(r["change_1d"]),
         "1 month": ui.pct(r["change_1m"]),
         "vs NIFTY (1m)": ui.pct(r["vs_nifty_1m"]),
+        "Momentum 12m": ui.pct(r["momentum"]).replace("%", " pts") if r.get("momentum") is not None else "–",
+        "Delivery %": (f"{r['delivery_pct']:.0f}% (usual {r['delivery_avg']:.0f}%)"
+                       if r.get("delivery_pct") is not None else "–"),
+        "F&O": r.get("buildup") or "–",
         "RSI": round(r["rsi"]) if r["rsi"] is not None else None,
         "Signals": f"{ui.BADGE[r['view']]} {r['view']} ({r['score']:+d})",
         "Your P&L": "" if r["pnl"] is None else f"{ui.rupees(r['pnl'], 0)} ({ui.pct(r['pnl_pct'])})",
         "Last AI call": f"{ui.RATING_BADGE.get(last['rating'], '')} {last['rating']} · {last['as_of']}" if last else "",
     })
-st.subheader("Scanner (strongest signals first)")
+st.subheader("Scanner")
+order = st.radio("Sort by", ["Momentum (most reliable)", "Signal score"], horizontal=True)
+if order.startswith("Momentum"):
+    table.sort(key=lambda row: -float(row["Momentum 12m"].replace(" pts", "")) if row["Momentum 12m"] != "–" else 1e9)
 st.dataframe(table, width="stretch", hide_index=True)
+st.caption("Momentum 12m = the stock's return over the last 12 months (skipping the latest month) minus NIFTY's. "
+           "Delivery % and F&O build-up come from NSE's official end-of-day files.")
 st.caption(f"Data as of {good[0]['date'] if good else '–'}. Today's signal view for each stock is saved to your "
            f"track record and judged after {prefs['horizon_days']} trading days.")
 bad = [r for r in rows if r["error"]]
@@ -116,5 +125,5 @@ else:
         st.session_state["wl_ai_results"] = results
     if st.session_state.get("wl_ai_results"):
         st.dataframe(st.session_state["wl_ai_results"], width="stretch", hide_index=True)
-    if not cfg["api_key"]:
-        st.warning("Paste an API key in the sidebar to run AI quick takes.")
+    if not cfg["ready"]:
+        st.warning("Finish the AI setup in the sidebar (model and, for cloud AI, an API key).")

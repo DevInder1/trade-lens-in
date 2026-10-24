@@ -5,8 +5,10 @@ import pandas as pd
 import indicators
 import macro
 import market
+import nse
 import portfolio
 import social
+import stats
 import track
 
 RECENT_COLUMNS = ["Open", "High", "Low", "Close", "Volume", "RSI", "MACD", "ATR"]
@@ -30,8 +32,31 @@ def company_name(symbol: str) -> str:
     return market.load_fundamentals(symbol).get("Company") or symbol.split(".")[0].lstrip("^")
 
 
+def live_extras(symbol: str, snap: dict, df: pd.DataFrame) -> dict:
+    out = {"delivery": None, "fo": None, "momentum": None, "verify": None}
+    try:
+        found = nse.delivery_summary(symbol)
+        out["delivery"] = {k: v for k, v in found.items() if k != "history"} if found else None
+    except Exception:
+        pass
+    try:
+        out["fo"] = nse.fo_for(symbol)
+    except Exception:
+        pass
+    try:
+        nifty = market.load_prices(track.BENCHMARK, "2y")["Close"]
+        out["momentum"] = stats.momentum_12_1(df["Close"], nifty)
+    except Exception:
+        pass
+    try:
+        out["verify"] = nse.verify(symbol, snap["Close"], snap["date"])
+    except Exception:
+        pass
+    return out
+
+
 def build(symbol: str, *, as_of=None, df=None, name=None, fundamentals=None, news=None, market_news=None,
-          macro_rows=None, chatter=None, book=None, memory=True) -> dict:
+          macro_rows=None, chatter=None, book=None, memory=True, turbulence=None, extras=None) -> dict:
     historical = as_of is not None
     if df is None:
         df = prices_as_of(symbol, as_of) if historical else indicators.add_indicators(market.load_prices(symbol, "2y"))
@@ -83,6 +108,8 @@ def build(symbol: str, *, as_of=None, df=None, name=None, fundamentals=None, new
         "position_text": position_text,
         "liquidity": (snap["VolAvg20"] or 0) * (snap["Close"] or 0),
         "memory": (track.memory_text(symbol, before=snap["date"] if historical else None) if memory else ""),
+        "turbulence": turbulence,
+        "extras": {} if historical else (extras if extras is not None else live_extras(symbol, snap, df)),
     }
 
 

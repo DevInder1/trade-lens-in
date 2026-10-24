@@ -30,6 +30,19 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     true_range = pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
     out["ATR"] = true_range.ewm(alpha=1 / 14, adjust=False).mean()
 
+    up_move, down_move = high.diff(), -low.diff()
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+    smooth_tr = true_range.ewm(alpha=1 / 14, adjust=False).mean()
+    out["DI_plus"] = 100 * plus_dm.ewm(alpha=1 / 14, adjust=False).mean() / smooth_tr
+    out["DI_minus"] = 100 * minus_dm.ewm(alpha=1 / 14, adjust=False).mean() / smooth_tr
+    dx = 100 * (out["DI_plus"] - out["DI_minus"]).abs() / (out["DI_plus"] + out["DI_minus"])
+    out["ADX"] = dx.ewm(alpha=1 / 14, adjust=False).mean()
+
+    typical = (high + low + close) / 3
+    mean_dev = typical.rolling(20).apply(lambda w: (abs(w - w.mean())).mean(), raw=True)
+    out["CCI"] = (typical - typical.rolling(20).mean()) / (0.015 * mean_dev)
+
     out["VolAvg20"] = out["Volume"].rolling(20).mean()
     return out
 

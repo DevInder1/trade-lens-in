@@ -2,6 +2,7 @@ from datetime import time
 
 import streamlit as st
 
+import ai
 import daily_report
 import portfolio
 import scheduler
@@ -32,7 +33,8 @@ if cfg["provider"] == ui.NO_AI:
 settings.update(report_hour=when.hour, report_minute=when.minute, report_ai=include_ai)
 if include_ai:
     st.caption(f"About **{len(book['watchlist'])} AI calls** per report, plus up to 10 for lessons. "
-               + ("" if cfg["api_key"] else "⚠️ The key must be saved (Remember ticked) for scheduled reports."))
+               + ("" if cfg["api_key"] or not ai.needs_key(cfg["provider"])
+                  else "⚠️ The key must be saved (Remember ticked) for scheduled reports."))
 
 if state["enabled"]:
     st.success(f"✅ Scheduled: every weekday at {state['hour']:02d}:{state['minute']:02d}. "

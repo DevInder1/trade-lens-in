@@ -2,7 +2,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -10,10 +10,12 @@ from dotenv import load_dotenv
 import ai
 import macro
 import market
+import nse
 import portfolio
 import research
 import scanner
 import settings
+import stats
 import track
 from storage import ENV_PATH, REPORTS_DIR, write_private_text
 
@@ -37,6 +39,8 @@ def _ai_ready(prefs: dict) -> tuple[str, str, str] | None:
     provider = prefs["provider"]
     if provider not in ai.PROVIDERS or not prefs["model"]:
         return None
+    if not ai.needs_key(provider):
+        return (provider, prefs["model"], None) if ai.live_models(provider) else None
     key = os.environ.get(ai.PROVIDERS[provider]["env"], "")
     return (provider, prefs["model"], key) if key else None
 
@@ -102,6 +106,21 @@ def generate(include_ai: bool | None = None, log=print) -> Path:
                      f"{_pct(nifty['change_1m'])}) · {nifty['trend'] or ''}")
     if macro.vix_reading(macro_rows):
         lines.append(f"- {macro.vix_reading(macro_rows)}")
+    try:
+        level = stats.turbulence_level(stats.turbulence(stats.basket_closes(now - timedelta(days=4 * 365))))
+    except Exception:
+        level = None
+    if level:
+        lines.append(f"- Market turbulence: **{level['label']}** ({level['five_day_percentile']:.0f}th percentile of "
+                     f"2 years) — {level['note']}")
+    try:
+        flows = nse.participants()
+    except Exception:
+        flows = None
+    fii = next((r for r in (flows or {}).get("rows", []) if r["Participant"].startswith("FII")), None)
+    if fii:
+        change = f", net change {fii['Net change']:+,} contracts" if fii.get("Net change") is not None else ""
+        lines.append(f"- FIIs in index futures: {fii['Long %']:.0f}% long ({flows['date']:%d %b}{change})")
     for m in macro_rows:
         if m["symbol"] in ("INR=X", "BZ=F", "GC=F", "^GSPC"):
             lines.append(f"- {m['name']}: {m['last']:,.2f} (1 week {_pct(m['change_1w'])})")
@@ -109,15 +128,22 @@ def generate(include_ai: bool | None = None, log=print) -> Path:
         lines += ["", "**Headlines**"] + [f"- [{n['title']}]({n['url']}) — {n['publisher']}, {n['date']}"
                                           for n in market_news[:6]]
 
-    lines += ["", "## Your watchlist (strongest signals first)"]
+    lines += ["", "## Your watchlist (by momentum)"]
     if good:
-        lines += ["| Stock | Close | 1 day | 1 month | vs NIFTY (1m) | RSI | Signals | Your P&L |",
-                  "|---|---|---|---|---|---|---|---|"]
-        for r in good:
+        lines += ["| Stock | Close | 1 day | 1 month | Momentum 12m | Delivery % | F&O | Signals | Your P&L |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+        ranked = sorted(good, key=lambda r: -(r["momentum"] if r.get("momentum") is not None else -1e9))
+        for r in ranked:
+            delivery = (f"{r['delivery_pct']:.0f}% (usual {r['delivery_avg']:.0f}%)"
+                        if r.get("delivery_pct") is not None else "–")
+            momentum = f"{r['momentum']:+.1f} pts" if r.get("momentum") is not None else "–"
             lines.append(
                 f"| {r['name']} ({r['symbol']}) | ₹{r['price']:,.2f} | {_pct(r['change_1d'])} | "
-                f"{_pct(r['change_1m'])} | {_pct(r['vs_nifty_1m'])} | {r['rsi']:.0f} | {r['view']} ({r['score']:+d}) | "
+                f"{_pct(r['change_1m'])} | {momentum} | {delivery} | {r.get('buildup') or '–'} | "
+                f"{r['view']} ({r['score']:+d}) | "
                 f"{_money(r['pnl'])} {'' if r['pnl_pct'] is None else _pct(r['pnl_pct'])} |")
+        lines.append("\nSorted by 12-month momentum vs NIFTY, our most reliable measure. Delivery % and F&O build-up "
+                     "are from NSE's official end-of-day files.")
     else:
         lines.append("Your watchlist is empty. Add stocks on the Watchlist page.")
     bad = [r for r in rows if r["error"]]

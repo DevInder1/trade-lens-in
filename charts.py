@@ -120,10 +120,11 @@ def pnl_calendar(daily: pd.Series, year: int, month: int) -> go.Figure:
 
 def equity_chart(curves: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
-    colors = {"Signals strategy": "#2563eb", "Buy and hold": "#f59e0b", "NIFTY 50": "#94a3b8"}
+    colors = {"Signals strategy": "#2563eb", "Signals + turbulence filter": "#16a34a", "Buy and hold": "#f59e0b",
+              "NIFTY 50": "#94a3b8", "Equal weight": "#f59e0b"}
     for col in curves.columns:
         fig.add_trace(go.Scatter(x=curves.index, y=curves[col], name=col,
-                                 line=dict(color=colors.get(col), width=2 if col == "Signals strategy" else 1.4)))
+                                 line=dict(color=colors.get(col, "#2563eb"), width=1.4 if col in colors else 2.2)))
     fig.add_hline(y=100, line=dict(color="#64748b", width=1, dash="dot"))
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10), hovermode="x unified",
                       yaxis_title="Value of ₹100 invested", legend=dict(orientation="h", y=1.08, x=0))
