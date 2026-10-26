@@ -107,6 +107,12 @@ def risk_off_mask(series: pd.Series, quantile: float = 0.9, window: int = TRADIN
     return series >= threshold
 
 
+def ordinal(value: float) -> str:
+    n = int(round(value))
+    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def momentum_12_1(close: pd.Series, bench: pd.Series) -> float | None:
     close, bench = close.dropna(), bench.reindex(close.index).ffill()
     if len(close) < 253:

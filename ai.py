@@ -5,6 +5,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.request import Request, urlopen
 
+import stats
+
 OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 PROVIDERS = {
@@ -317,7 +319,7 @@ def _risk_facts(data: dict) -> str:
     t = data.get("turbulence")
     if t:
         facts.append(f"Market turbulence index (how unusual recent market moves are vs the past year): {t['label']} "
-                     f"(5-day average at the {t['five_day_percentile']:.0f}th percentile of the last 2 years) — "
+                     f"(5-day average at the {stats.ordinal(t['five_day_percentile'])} percentile of the last 2 years) — "
                      f"{t['note']}")
     return "\n".join(f for f in facts if f)
 

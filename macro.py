@@ -1,10 +1,12 @@
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
 import yfinance as yf
 
 import market
+import nse
 
 MACRO = {
     "NIFTY 50": "^NSEI",
@@ -36,22 +38,44 @@ def _trend(close):
     return "Mixed (between its 50- and 200-day averages)"
 
 
-def _history(symbol, as_of=None):
+NSE_NAMES = {"^NSEI": "Nifty 50", "^NSEBANK": "Nifty Bank", "^INDIAVIX": "India VIX"}
+KEY_SYMBOLS = {"^NSEI", "^INDIAVIX"}
+
+
+def _history(symbol, as_of=None, attempts=3):
+    for attempt in range(attempts):
+        try:
+            if as_of is None:
+                close = yf.Ticker(symbol).history(period="1y", interval="1d")["Close"].dropna()
+            else:
+                end = pd.Timestamp(as_of)
+                close = market.load_history(symbol, end - pd.Timedelta(days=400), end)["Close"]
+            if close is not None and not close.empty:
+                if close.index.tz is not None:
+                    close.index = close.index.tz_localize(None)
+                return close
+        except Exception:
+            pass
+        time.sleep(1 + attempt)
+    return None
+
+
+def _nse_history(symbol):
     try:
-        if as_of is None:
-            return yf.Ticker(symbol).history(period="1y", interval="1d")["Close"].dropna()
-        end = pd.Timestamp(as_of)
-        return market.load_history(symbol, end - pd.Timedelta(days=400), end)["Close"]
+        close = nse.index_history(NSE_NAMES[symbol])
     except Exception:
         return None
+    return close if not close.empty else None
 
 
 def load_macro(as_of=None) -> list[dict]:
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         closes = dict(zip(MACRO, pool.map(lambda s: _history(s, as_of), MACRO.values())))
     rows = []
     for name, symbol in MACRO.items():
-        close = closes[name]
+        close, source = closes[name], "Yahoo Finance"
+        if (close is None or close.empty) and as_of is None and symbol in NSE_NAMES:
+            close, source = _nse_history(symbol), "NSE official close"
         if close is None or close.empty:
             continue
         rows.append({
@@ -63,8 +87,13 @@ def load_macro(as_of=None) -> list[dict]:
             "change_1m": _pct(close, 21),
             "change_3m": _pct(close, 63),
             "trend": _trend(close),
+            "source": source,
         })
     return rows
+
+
+def complete(rows: list[dict]) -> bool:
+    return KEY_SYMBOLS <= {r["symbol"] for r in rows}
 
 
 VIX_LEVELS = ((13, "Calm", "low fear"), (18, "Normal", "typical volatility"),

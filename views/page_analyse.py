@@ -8,6 +8,7 @@ import market
 import portfolio
 import research
 import settings
+import stats
 import track
 import ui
 
@@ -231,7 +232,7 @@ with tab_market:
         st.subheader(f"🌡️ {vix}")
     if turbulence:
         st.markdown(f"**Market turbulence: {turbulence['label']}** — {turbulence['note']} (5-day average at the "
-                    f"{turbulence['five_day_percentile']:.0f}th percentile of the last 2 years, from 50 large stocks).")
+                    f"{stats.ordinal(turbulence['five_day_percentile'])} percentile of the last 2 years, from 50 large stocks).")
         st.line_chart(turbulence_series.tail(500).rename("Turbulence index"), height=160)
         st.caption("Turbulence measures how unusual the market's moves are compared with the past year "
                    "(the FinRL framework's risk switch). Spikes match events like the June 2024 election result day.")

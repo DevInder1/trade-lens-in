@@ -17,6 +17,7 @@ URLS = {
     "equity": BASE + "/products/content/sec_bhavdata_full_{d:%d%m%Y}.csv",
     "fo": BASE + "/content/fo/BhavCopy_NSE_FO_0_0_0_{d:%Y%m%d}_F_0000.csv.zip",
     "participants": BASE + "/content/nsccl/fao_participant_oi_{d:%d%m%Y}.csv",
+    "indices": BASE + "/content/indices/ind_close_all_{d:%d%m%Y}.csv",
 }
 MISSING_TTL = 6 * 3600
 _missing: dict[tuple, float] = {}
@@ -53,6 +54,8 @@ def session_date(kind: str, raw: bytes) -> date | None:
             return pd.to_datetime(text[1].split(",")[2].strip(), format="%d-%b-%Y").date()
         if kind == "fo":
             return pd.to_datetime(text[1].split(",")[0].strip()).date()
+        if kind == "indices":
+            return pd.to_datetime(text[1].split(",")[1].strip(), format="%d-%m-%Y").date()
         title = text[0].split("as on")[-1].strip().strip('",')
         return pd.to_datetime(title, format="%b %d, %Y").date()
     except (IndexError, ValueError):
@@ -95,6 +98,16 @@ def listed_stocks() -> dict[str, str]:
         return saved.get("stocks") or {s["symbol"]: s["name"] for s in fno.universe()}
     write_json(LISTED_PATH, {"saved": time.time(), "stocks": stocks})
     return stocks
+
+
+def index_history(name: str, sessions: int = 70) -> pd.Series:
+    closes = {}
+    for day, raw in recent_days("indices", sessions, max_back=int(sessions * 1.6) + 10):
+        df = pd.read_csv(io.BytesIO(raw))
+        row = df[df["Index Name"].astype(str).str.strip().str.lower() == name.lower()]
+        if not row.empty:
+            closes[pd.Timestamp(day)] = float(row["Closing Index Value"].iloc[0])
+    return pd.Series(closes, name="Close").sort_index()
 
 
 def _equity_frame(raw: bytes) -> pd.DataFrame:

@@ -110,8 +110,15 @@ def get_market_news():
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_macro():
+def _macro():
     return macro.load_macro()
+
+
+def get_macro():
+    rows = _macro()
+    if not macro.complete(rows):
+        _macro.clear()
+    return rows
 
 
 @st.cache_data(ttl=3600, show_spinner=False)

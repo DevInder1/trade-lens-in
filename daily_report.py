@@ -111,7 +111,7 @@ def generate(include_ai: bool | None = None, log=print) -> Path:
     except Exception:
         level = None
     if level:
-        lines.append(f"- Market turbulence: **{level['label']}** ({level['five_day_percentile']:.0f}th percentile of "
+        lines.append(f"- Market turbulence: **{level['label']}** ({stats.ordinal(level['five_day_percentile'])} percentile of "
                      f"2 years) — {level['note']}")
     try:
         flows = nse.participants()

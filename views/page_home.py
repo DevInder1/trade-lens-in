@@ -8,6 +8,7 @@ import intraday
 import journal
 import macro
 import portfolio
+import stats
 import track
 import ui
 import zones
@@ -31,9 +32,14 @@ fii = next((r for r in (flows or {}).get("rows", []) if r["Participant"].startsw
 c = st.columns(4)
 if nifty:
     c[0].metric("NIFTY 50", f"{nifty['last']:,.0f}", f"{ui.pct(nifty['change_1w'])} this week")
-c[1].metric("Fear gauge (India VIX)", macro.vix_mood(macro_rows) or "–")
+vix_row = next((r for r in macro_rows if r["symbol"] == "^INDIAVIX"), None)
+c[1].metric("Fear gauge (India VIX)", macro.vix_mood(macro_rows) or "Unavailable",
+            f"NSE close {pd.Timestamp(vix_row['date']):%d %b}" if vix_row and vix_row.get("source", "").startswith("NSE")
+            else None, delta_color="off",
+            help="Expected NIFTY volatility. Below 13 calm, 13–18 normal, 18–25 nervous, above 25 fearful. "
+                 "From Yahoo Finance, or NSE's official close if Yahoo doesn't respond.")
 if turbulence:
-    c[2].metric("Market turbulence", turbulence["label"], f"{turbulence['five_day_percentile']:.0f}th percentile",
+    c[2].metric("Market turbulence", turbulence["label"], f"{stats.ordinal(turbulence['five_day_percentile'])} percentile",
                 delta_color="off", help="How unusual recent market moves are vs the past year (FinRL's risk switch).")
 if fii:
     c[3].metric("FII index futures long", f"{fii['Long %']:.0f}%",
